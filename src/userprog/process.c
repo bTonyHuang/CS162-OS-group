@@ -91,6 +91,11 @@ static void start_process(void* file_name_) {
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+
+    file_type_list fd_list;
+
+    list_init(&fd_list);
+    t->pcb->fd_list = &fd_list;
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -473,7 +478,7 @@ static bool setup_stack(void** esp) {
   if (kpage != NULL) {
     success = install_page(((uint8_t*)PHYS_BASE) - PGSIZE, kpage, true);
     if (success)
-      *esp = PHYS_BASE;
+      *esp = PHYS_BASE - 20;
     else
       palloc_free_page(kpage);
   }
