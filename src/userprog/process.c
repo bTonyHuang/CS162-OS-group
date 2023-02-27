@@ -264,7 +264,7 @@ struct Elf32_Phdr {
 #define PF_W 2 /* Writable. */
 #define PF_R 4 /* Readable. */
 
-static bool setup_stack(void** esp);
+static bool setup_stack(void** esp, const char* file_name);
 static bool validate_segment(const struct Elf32_Phdr*, struct file*);
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t read_bytes,
                          uint32_t zero_bytes, bool writable);
@@ -286,6 +286,8 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   if (t->pcb->pagedir == NULL)
     goto done;
   process_activate();
+
+  // tokenize the first guy -> filename
 
   /* Open executable file. */
   file = filesys_open(file_name);
@@ -353,7 +355,7 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   }
 
   /* Set up stack. */
-  if (!setup_stack(esp))
+  if (!setup_stack(esp, file_name))
     goto done;
 
   /* Start address. */
@@ -470,17 +472,95 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-static bool setup_stack(void** esp) {
+static bool setup_stack(void** esp, const char* file_name) {
   uint8_t* kpage;
   bool success = false;
 
   kpage = palloc_get_page(PAL_USER | PAL_ZERO);
   if (kpage != NULL) {
     success = install_page(((uint8_t*)PHYS_BASE) - PGSIZE, kpage, true);
-    if (success)
-      *esp = PHYS_BASE - 20;
-    else
+    if (success) {
+      *esp = PHYS_BASE;
+
+      /* Argument Passing */
+      char* stack_ptr = (char *) *esp; // starts at PHYS_BASE
+      int argc = 0;
+      int len_literals = 0;
+      char file_name_copy[strlen(file_name) + 1];
+      strlcpy(file_name_copy, file_name, strlen(file_name) + 1);
+
+      /* Tokenize to push literals onto stack, and keep track of argc */
+      char* context = NULL;
+      char* token = strtok_r(file_name_copy, " ", &context);
+
+      while (token != NULL) {
+        argc += 1;
+
+        int size = strlen(token) + 1;
+        len_literals += size;
+        stack_ptr -= size;
+
+        memcpy(stack_ptr, token, size);
+
+        token = strtok_r(NULL, " ", &context);
+      }
+
+      /* Iterate again, this time pushing the addresses of argument literals into the argv array */
+      char* argv[argc + 1];
+      argv[argc] = NULL;
+      argc = 0;
+
+      stack_ptr = (char *) *esp;
+      context = NULL;
+      token = strtok_r(file_name_copy, " ", &context);
+
+      while (token != NULL) {
+        argc += 1;
+        int size = strlen(token) + 1;
+        stack_ptr -= size;
+
+        argv[argc - 1] = stack_ptr;
+
+        token = strtok_r(NULL, " ", &context);
+      }
+
+      /* Stack align, decrement stack_ptr */
+      int offset = len_literals + 8; // argv argc
+      offset += 4 * (argc + 1); // argv addresses
+      int padding = 16 - (offset % 16);
+      stack_ptr = stack_ptr - padding;
+
+      /* Memcpy all of the argv pointers onto the stack */
+      stack_ptr = (char **) stack_ptr;
+      stack_ptr -= 4 * (argc + 1);
+      memcpy(stack_ptr, argv, 4 * (argc + 1));
+
+      // printf("stack pointer is at: %x\n", stack_ptr);
+
+      /* Push argv and argc onto the stack, then a fake return address */
+
+      char* argv_start = stack_ptr;
+      stack_ptr -= sizeof(char*);
+      memcpy(stack_ptr, &argv_start, sizeof(char*));
+
+      // stack_ptr -= 4;
+      // *stack_ptr = (char **) (stack_ptr + 4);
+
+      // printf("attempting to deref stack_ptr %i\n", *stack_ptr);
+
+      stack_ptr -= 4;
+      *stack_ptr = argc;
+      stack_ptr -= 4;
+      *stack_ptr = 0;
+
+      /* Set the actual factual esp to our modified esp */
+      *esp = (void *) stack_ptr;
+
+      /* Debugging */
+      // hex_dump(0, *esp, 100, true);
+    } else {
       palloc_free_page(kpage);
+    }
   }
   return success;
 }
