@@ -280,6 +280,10 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   off_t file_ofs;
   bool success = false;
   int i;
+  int totalLength=strlen(file_name);
+  char fileName[totalLength+1];
+  strlcpy(fileName,file_name,totalLength+1);
+
 
   /* Allocate and activate page directory. */
   t->pcb->pagedir = pagedir_create();
@@ -288,13 +292,20 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   process_activate();
 
   // tokenize the first guy -> filename
+  for(i=0;i<totalLength;i++){
+    if(fileName[i]==' '){
+      fileName[i]='\0';
+      break;
+    }
+  }
 
   /* Open executable file. */
-  file = filesys_open(file_name);
+  file = filesys_open(fileName);
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
     goto done;
   }
+  strlcpy(t->pcb->process_name, fileName, i+1);
 
   /* Read and verify executable header. */
   if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
@@ -505,6 +516,7 @@ static bool setup_stack(void** esp, const char* file_name) {
         token = strtok_r(NULL, " ", &context);
       }
 
+
       /* Iterate again, this time pushing the addresses of argument literals into the argv array */
       char* argv[argc + 1];
       argv[argc] = NULL;
@@ -512,6 +524,7 @@ static bool setup_stack(void** esp, const char* file_name) {
 
       stack_ptr = (char *) *esp;
       context = NULL;
+      strlcpy(file_name_copy, file_name, strlen(file_name) + 1);
       token = strtok_r(file_name_copy, " ", &context);
 
       while (token != NULL) {
@@ -538,7 +551,6 @@ static bool setup_stack(void** esp, const char* file_name) {
       // printf("stack pointer is at: %x\n", stack_ptr);
 
       /* Push argv and argc onto the stack, then a fake return address */
-
       char* argv_start = stack_ptr;
       stack_ptr -= sizeof(char*);
       memcpy(stack_ptr, &argv_start, sizeof(char*));
@@ -552,6 +564,7 @@ static bool setup_stack(void** esp, const char* file_name) {
       *stack_ptr = argc;
       stack_ptr -= 4;
       *stack_ptr = 0;
+
 
       /* Set the actual factual esp to our modified esp */
       *esp = (void *) stack_ptr;
