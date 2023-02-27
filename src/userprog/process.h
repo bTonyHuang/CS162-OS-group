@@ -17,7 +17,7 @@ typedef tid_t pid_t;
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
-typedef struct list file_type_list;
+typedef struct list file_mapping_list;
 
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate
@@ -29,12 +29,12 @@ struct process {
   uint32_t* pagedir;          /* Page directory. */
   char process_name[16];      /* Name of the main thread */
   struct thread* main_thread; /* Pointer to main thread */
-  file_type_list* fd_list; // pintos list of fd->file* mappings
+  file_mapping_list* fm_list; // pintos list of fd->file* mappings
   int num_fds;
   // global lock for multiprocess file ops
 };
 
-struct file_type {
+struct file_mapping {
   int fd;
   struct file* file_struct_ptr;
   struct list_elem elem;

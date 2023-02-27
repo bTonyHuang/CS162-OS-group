@@ -88,14 +88,24 @@ static void start_process(void* file_name_) {
     new_pcb->pagedir = NULL;
     t->pcb = new_pcb;
 
+    /* Tokenize the file_name so we don't pass args into filesys_open */
+    char file_name_copy[strlen(file_name) + 1];
+    strlcpy(file_name_copy, file_name, strlen(file_name) + 1);
+
+    /* Tokenize to push literals onto stack, and keep track of argc */
+    char* context = NULL;
+    char* file_executable = strtok_r(file_name_copy, " ", &context);
+
+    // strlcpy(t->name, file_executable, sizeof t->name);
+
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
 
-    file_type_list fd_list;
+    file_mapping_list fm_list;
 
-    list_init(&fd_list);
-    t->pcb->fd_list = &fd_list;
+    list_init(&fm_list);
+    t->pcb->fm_list = &fm_list;
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -281,16 +291,22 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   bool success = false;
   int i;
 
+  /* Tokenize the file_name so we don't pass args into filesys_open */
+  char file_name_copy[strlen(file_name) + 1];
+  strlcpy(file_name_copy, file_name, strlen(file_name) + 1);
+
+  /* Tokenize to push literals onto stack, and keep track of argc */
+  char* context = NULL;
+  char* file_executable = strtok_r(file_name_copy, " ", &context);
+
   /* Allocate and activate page directory. */
   t->pcb->pagedir = pagedir_create();
   if (t->pcb->pagedir == NULL)
     goto done;
   process_activate();
 
-  // tokenize the first guy -> filename
-
   /* Open executable file. */
-  file = filesys_open(file_name);
+  file = filesys_open(file_executable);
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
     goto done;
@@ -511,8 +527,10 @@ static bool setup_stack(void** esp, const char* file_name) {
       argc = 0;
 
       stack_ptr = (char *) *esp;
+      char file_name_copy2[strlen(file_name) + 1];
+      strlcpy(file_name_copy2, file_name, strlen(file_name) + 1);
       context = NULL;
-      token = strtok_r(file_name_copy, " ", &context);
+      token = strtok_r(file_name_copy2, " ", &context);
 
       while (token != NULL) {
         argc += 1;
@@ -531,22 +549,14 @@ static bool setup_stack(void** esp, const char* file_name) {
       stack_ptr = stack_ptr - padding;
 
       /* Memcpy all of the argv pointers onto the stack */
-      stack_ptr = (char **) stack_ptr;
       stack_ptr -= 4 * (argc + 1);
       memcpy(stack_ptr, argv, 4 * (argc + 1));
-
-      // printf("stack pointer is at: %x\n", stack_ptr);
 
       /* Push argv and argc onto the stack, then a fake return address */
 
       char* argv_start = stack_ptr;
       stack_ptr -= sizeof(char*);
       memcpy(stack_ptr, &argv_start, sizeof(char*));
-
-      // stack_ptr -= 4;
-      // *stack_ptr = (char **) (stack_ptr + 4);
-
-      // printf("attempting to deref stack_ptr %i\n", *stack_ptr);
 
       stack_ptr -= 4;
       *stack_ptr = argc;
