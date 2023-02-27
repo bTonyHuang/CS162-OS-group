@@ -1,15 +1,21 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/process.h"
-
+#include "threads/malloc.h"
 #include "filesys/file.h"
+#include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 
 static void syscall_handler(struct intr_frame*);
 struct file* find_file(struct process* p, int fd);
 int add_file(struct file* new_file);
+bool valid_address(void* uaddr);
+void validate_pointer(void* ptr, size_t size);
+void validate_string(char* ustr);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
@@ -17,9 +23,6 @@ struct file* find_file(struct process* p, int fd) {
   file_mapping_list* fm_list_ptr = p->fm_list;
   struct list_elem* iter;
   struct file_mapping* temp;
-
-  // int length = list_size(fm_list_ptr);
-  // printf("length of fd list %d\n", length);
 
   for (iter = list_begin(fm_list_ptr); iter != list_end(fm_list_ptr); iter = list_next(iter)) {
     temp = list_entry(iter, struct file_mapping, elem);
@@ -35,7 +38,7 @@ int add_file(struct file* new_file) {
   struct file_mapping* f = malloc(sizeof(struct file_mapping));
   f->file_struct_ptr = new_file;
   f->fd = p->num_fds++;
-  list_push_back(&p->file_mapping_list, &f->elem);
+  list_push_back(p->fm_list, &f->elem);
   return f->fd;
 }
 
@@ -43,13 +46,13 @@ bool valid_address(void* uaddr) {
   return is_user_vaddr(uaddr) && pagedir_get_page(thread_current()->pcb->pagedir, uaddr) != NULL;
 }
 
-void check_ptr(void* ptr, size_t size) {
+void validate_pointer(void* ptr, size_t size) {
   if (!valid_address(ptr) || !valid_address(ptr + size)) {
     process_exit();
   }
 }
 
-void check_string(char* ustr) {
+void validate_string(char* ustr) {
   if (is_user_vaddr(ustr)) {
     char* full_string = pagedir_get_page(thread_current()->pcb->pagedir, ustr);
     if (full_string != NULL && valid_address(ustr + strlen(full_string) + 1))
