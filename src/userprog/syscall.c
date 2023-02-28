@@ -15,15 +15,18 @@
 static void syscall_handler(struct intr_frame*);
 struct file* find_file(struct process* p, int fd);
 int add_file(struct file* new_file);
-bool valid_address(void* uaddr);
-bool valid_pointer(void* ptr, size_t size);
+bool valid_pointer(void* uaddr, size_t size);
+void validate_pointer(uint32_t* eax_register, void* ptr, size_t size);
 bool valid_string(char* ustr);
+void graceful_exception_exit(int status);
 
 void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
   uint32_t* args = ((uint32_t*)f->esp);
   int fd;
+  validate_pointer(&f->eax, args, sizeof(uint32_t));
+
 
   // bool valid_ptr = valid_pointer(args, 4);
   // if (!valid_ptr) {
@@ -43,21 +46,52 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_EXIT:
       f->eax = args[1];
       printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
-      struct status_node* my_status = thread_current()->pcb->my_status;
-      my_status->exit_status = args[1];
+      // close all fds
+      free(thread_current()->pcb->fm_list);
+      int num_child_refs = list_size(thread_current()->pcb->cm_list);
 
-      lock_acquire(my_status->status_lock);
-      my_status->ref_count -= 1;
-      lock_release(my_status->status_lock);
+      if (num_child_refs > 0) {
+        struct status_node* nodes_to_free[num_child_refs];
+        child_mapping_list* cm_list_ptr = thread_current()->pcb->cm_list;
+        struct list_elem* iter;
+        struct status_node* temp;
+        int count = 0;
 
-      if (my_status->ref_count == 0) {
-        free(my_status->status_lock);
-        free(my_status);
-        process_exit();
-        break;
+        for (iter = list_begin(cm_list_ptr); iter != list_end(cm_list_ptr); iter = list_next(iter)) {
+          temp = list_entry(iter, struct status_node, elem);
+          lock_acquire(temp->status_lock);
+          temp->ref_count -= 1;
+          lock_release(temp->status_lock);
+          if (temp->ref_count == 0) {
+            nodes_to_free[count] = temp;
+            count += 1;
+          }
+        }
+
+        for (; count > 0; count -= 1) {
+          temp = nodes_to_free[count - 1];
+          free(temp->status_lock);
+          free(temp);
+        }
       }
+      free(thread_current()->pcb->cm_list);
 
-      sema_up(&(my_status->exit_sema));
+      struct status_node* my_status = thread_current()->pcb->my_status;
+      if (my_status != NULL) {
+        my_status->exit_status = args[1];
+
+        lock_acquire(my_status->status_lock);
+        my_status->ref_count -= 1;
+        lock_release(my_status->status_lock);
+
+        if (my_status->ref_count == 0) {
+          free(my_status->status_lock);
+          free(my_status);
+        } else {
+          sema_up(&(my_status->exit_sema));
+        }
+      }
+      
       process_exit();
       break;
     case SYS_WRITE:
@@ -65,39 +99,13 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       char* buffer = (char*) args[2];
       size_t size = args[3];
 
-      // if (buffer == NULL) {
-      //   f->eax = -1;
-      //   process_exit();
-      //   break;
-      // }
-
-      // bool buffer_valid = valid_pointer(buffer, size);
-      // if (!buffer_valid) {
-      //   f->eax = -1;
-      //   process_exit();
-      //   break;
-      // }
-
-      // bool valid_addr = valid_address(args[2]);
-      // if (!valid_addr) {
-      //   f->eax = -1;
-      //   process_exit();
-      // }
-
-      struct file* file_struct;
-
-      file_struct = find_file(thread_current()->pcb, fd);
-      // if (file_struct == NULL) {
-      //   break; // bad fd, handle later
-      // }
-
       if (fd == 1) {
         putbuf((void *) buffer, size);
         f->eax = size;
         break;
       }
 
-      f->eax = file_write(file_struct, buffer, size);
+      // f->eax = file_write(file_struct, buffer, size);
       break;
     case SYS_PRACTICE:
       f->eax = args[1] + 1;
@@ -107,20 +115,19 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       break;
     case SYS_EXEC:
       ;
-      //struct lock* new_lock = malloc(sizeof(struct lock));
+      struct lock* new_lock = malloc(sizeof(struct lock));
       struct status_node* new_status = malloc(sizeof(struct status_node));
 
       sema_init(&(new_status->load_sema), 0);
       sema_init(&(new_status->exit_sema), 0);
-      lock_init(new_status->status_lock);
+      lock_init(new_lock);
+      new_status->status_lock = new_lock;
 
       new_status->loaded = false;
       new_status->exit_status = -1;
       new_status->ref_count = 2;
 
-      list_push_back(thread_current()->pcb->cm_list, &new_status->elem);
-
-      // validate args here
+      list_push_front(thread_current()->pcb->cm_list, &new_status->elem);
 
       pid_t cpid = process_execute((const char *)  args[1], new_status);
       sema_down(&(new_status->load_sema));
@@ -130,11 +137,14 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       } else {
         f->eax = -1;
         list_remove(&new_status->elem);
-        free((char *) args[1]);
+        free(new_status->status_lock);
         free(new_status);
       }
 
       break;
+    case SYS_WAIT:
+      ;
+
 
   }
 
@@ -173,24 +183,62 @@ int add_file(struct file* new_file) {
 
 /* Pointer validation helper functions to gracefully kill misbehaving processes. */
 /* Helps to pass exit(-1) messages even if a process exits due to a fault */
-bool valid_address(void* uaddr) {
-  return is_user_vaddr(uaddr) && pagedir_get_page(thread_current()->pcb->pagedir, uaddr) != NULL;
+bool valid_pointer(void* uaddr, size_t size) {
+	/* Make sure that the pointer doesn't leak into kernel memory */
+  return is_user_vaddr(uaddr + size) && pagedir_get_page(thread_current()->pcb->pagedir, uaddr + size) != NULL;
 }
 
-bool valid_pointer(void* ptr, size_t size) {
-  if (!valid_address(ptr) || !valid_address(ptr + size)) {
-    return false;
-  }
-  return true;
+void validate_pointer(uint32_t* eax_register, void* ptr, size_t size) {
+	if (!valid_pointer(ptr, size)) {
+		*eax_register = -1;
+		printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
+		thread_current()->pcb->my_status->exit_status = -1;
+	  process_exit();
+	  NOT_REACHED();
+	}
 }
 
-bool valid_string(char* ustr) {
-  if (is_user_vaddr(ustr)) {
-    char* full_string = pagedir_get_page(thread_current()->pcb->pagedir, ustr);
-    if (full_string != NULL && valid_address(ustr + strlen(full_string) + 1))
-      return true;
+void graceful_exception_exit(int status) {
+  if (thread_current()->pcb->my_status != NULL) {
+    thread_current()->pcb->my_status->exit_status = status;
   }
-  return false;
+
+  printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
+  process_exit();
 }
+
+bool valid_string(char *str) {
+	if (!is_user_vaddr(str)) {
+		return false;
+	}
+  char *kernel_page_str = pagedir_get_page(thread_current()->pagedir, (void *) str);
+
+  if (kernel_page_str == NULL) {
+  	return false;
+  } else {
+  	char *final_str = str + strlen(kernel_page_str) + 1;
+  	if (!is_user_vaddr(final_str) || pagedir_get_page(thread_current()->pcb->pagedir, final_str) == NULL) {
+      return false;
+  	}
+  }
+
+	return true;
+}
+
+// bool valid_pointer(void* ptr, size_t size) {
+//   if (!valid_address(ptr) || !valid_address(ptr + size)) {
+//     return false;
+//   }
+//   return true;
+// }
+
+// bool valid_string(char* ustr) {
+//   if (is_user_vaddr(ustr)) {
+//     char* full_string = pagedir_get_page(thread_current()->pcb->pagedir, ustr);
+//     if (full_string != NULL && valid_address(ustr + strlen(full_string) + 1))
+//       return true;
+//   }
+//   return false;
+// }
 
 

@@ -62,12 +62,12 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
-  struct start_process_data sp_data;
-  sp_data.file_name = fn_copy;
-  sp_data.set_status = child;
+  struct start_process_data* sp_data = malloc(sizeof(struct start_process_data));
+  sp_data->file_name = fn_copy;
+  sp_data->set_status = child;
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, &sp_data);
+  tid = thread_create(file_name, PRI_DEFAULT, start_process, sp_data);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
   return tid;
@@ -99,11 +99,14 @@ static void start_process(void* data) {
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
 
-    file_mapping_list fm_list;
+    file_mapping_list* fm_list = malloc(sizeof(struct list));
+    child_mapping_list* cm_list = malloc(sizeof(struct list));
 
-    list_init(&fm_list);
-    t->pcb->fm_list = &fm_list;
-    new_pcb->my_status = sp_status;
+    list_init(fm_list);
+    list_init(cm_list);
+    t->pcb->fm_list = fm_list;
+    t->pcb->cm_list = cm_list;
+    t->pcb->my_status = sp_status;
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -129,12 +132,18 @@ static void start_process(void* data) {
   palloc_free_page(file_name);
   if (!success) {
     sema_up(&temporary);
-    t->pcb->my_status->loaded = false;
+    if (t->pcb->my_status != NULL) {
+      t->pcb->my_status->loaded = false;
+    }
     thread_exit();
   } else {
-    t->pcb->my_status->loaded = true;
+    if (t->pcb->my_status != NULL) {
+      t->pcb->my_status->loaded = true;
+    }
   }
-  sema_up(&t->pcb->my_status->load_sema);
+  if (t->pcb->my_status != NULL) {
+    sema_up(&t->pcb->my_status->load_sema);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -164,6 +173,8 @@ int process_wait(pid_t child_pid UNUSED) {
 void process_exit(void) {
   struct thread* cur = thread_current();
   uint32_t* pd;
+
+  file_close(cur->file_executable);
 
   /* If this thread does not have a PCB, don't worry */
   if (cur->pcb == NULL) {
@@ -320,6 +331,9 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
     goto done;
   }
 
+  file_deny_write(file);
+  t->file_executable = file;
+
   /* Read and verify executable header. */
   if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
       memcmp(ehdr.e_ident, "\177ELF\1\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 3 ||
@@ -389,7 +403,7 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
 
 done:
   /* We arrive here whether the load is successful or not. */
-  file_close(file);
+  // file_close(file);
   return success;
 }
 

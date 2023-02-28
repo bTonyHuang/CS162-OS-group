@@ -34,7 +34,6 @@ struct process {
   struct thread* main_thread; /* Pointer to main thread */
   file_mapping_list* fm_list; // pintos list of fd->file* mappings
   int num_fds;
-  // global lock for multiprocess file ops
   child_mapping_list* cm_list; // if i am a process, and i became a parent by SYS_EXEC and spawning 1+ children, then i have this list of nodes
   struct status_node* my_status; // if a parent spawned me using exec, then i have this node
   
