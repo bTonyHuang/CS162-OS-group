@@ -3,6 +3,7 @@
 
 #include "threads/thread.h"
 #include <stdint.h>
+#include "threads/synch.h"
 
 // At most 8MB can be allocated to the stack
 // These defines will be used in Project 2: Multithreading
@@ -18,6 +19,8 @@ typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
 typedef struct list file_mapping_list;
+typedef struct list child_mapping_list;
+
 
 /* The process control block for a given process. Since
    there can be multiple threads per process, we need a separate
@@ -32,13 +35,15 @@ struct process {
   file_mapping_list* fm_list; // pintos list of fd->file* mappings
   int num_fds;
   // global lock for multiprocess file ops
+  child_mapping_list* cm_list; // if i am a process, and i became a parent by SYS_EXEC and spawning 1+ children, then i have this list of nodes
+  struct status_node* my_status; // if a parent spawned me using exec, then i have this node
   
 };
 
 struct status_node {
    struct semaphore load_sema;
-   struct semaphpre exit_sema;
-   lock_t global_lock;
+   struct semaphore exit_sema;
+   struct lock* status_lock;
 
    pid_t pid;
    bool loaded;
@@ -46,7 +51,7 @@ struct status_node {
    int ref_count;
 
    struct list_elem elem;
-}
+};
 
 struct file_mapping {
   int fd;
@@ -54,9 +59,14 @@ struct file_mapping {
   struct list_elem elem;
 };
 
+struct start_process_data {
+  char* file_name;
+  struct status_node* set_status;
+};
+
 void userprog_init(void);
 
-pid_t process_execute(const char* file_name);
+pid_t process_execute(const char* file_name, struct status_node* child);
 int process_wait(pid_t);
 void process_exit(void);
 void process_activate(void);

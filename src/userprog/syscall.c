@@ -9,6 +9,8 @@
 #include "filesys/file.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "devices/shutdown.h"
+#include "threads/synch.h"
 
 static void syscall_handler(struct intr_frame*);
 struct file* find_file(struct process* p, int fd);
@@ -41,6 +43,21 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_EXIT:
       f->eax = args[1];
       printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
+      struct status_node* my_status = thread_current()->pcb->my_status;
+      my_status->exit_status = args[1];
+
+      lock_acquire(my_status->status_lock);
+      my_status->ref_count -= 1;
+      lock_release(my_status->status_lock);
+
+      if (my_status->ref_count == 0) {
+        free(my_status->status_lock);
+        free(my_status);
+        process_exit();
+        break;
+      }
+
+      sema_up(&(my_status->exit_sema));
       process_exit();
       break;
     case SYS_WRITE:
@@ -85,6 +102,40 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_PRACTICE:
       f->eax = args[1] + 1;
       break;
+    case SYS_HALT:
+      shutdown_power_off();
+      break;
+    case SYS_EXEC:
+      ;
+      //struct lock* new_lock = malloc(sizeof(struct lock));
+      struct status_node* new_status = malloc(sizeof(struct status_node));
+
+      sema_init(&(new_status->load_sema), 0);
+      sema_init(&(new_status->exit_sema), 0);
+      lock_init(new_status->status_lock);
+
+      new_status->loaded = false;
+      new_status->exit_status = -1;
+      new_status->ref_count = 2;
+
+      list_push_back(thread_current()->pcb->cm_list, &new_status->elem);
+
+      // validate args here
+
+      pid_t cpid = process_execute((const char *)  args[1], new_status);
+      sema_down(&(new_status->load_sema));
+      
+      if (new_status->loaded) {
+        f->eax = cpid;
+      } else {
+        f->eax = -1;
+        list_remove(&new_status->elem);
+        free((char *) args[1]);
+        free(new_status);
+      }
+
+      break;
+
   }
 
   //original version

@@ -50,7 +50,7 @@ void userprog_init(void) {
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
-pid_t process_execute(const char* file_name) {
+pid_t process_execute(const char* file_name, struct status_node* child) {
   char* fn_copy;
   tid_t tid;
 
@@ -62,8 +62,12 @@ pid_t process_execute(const char* file_name) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  struct start_process_data sp_data;
+  sp_data.file_name = fn_copy;
+  sp_data.set_status = child;
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create(file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create(file_name, PRI_DEFAULT, start_process, &sp_data);
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
   return tid;
@@ -71,8 +75,11 @@ pid_t process_execute(const char* file_name) {
 
 /* A thread function that loads a user process and starts it
    running. */
-static void start_process(void* file_name_) {
-  char* file_name = (char*)file_name_;
+static void start_process(void* data) {
+  struct start_process_data* sp_data = (struct start_process_data*) data;
+  // char* file_name = (char*)file_name_;
+  char* file_name = sp_data->file_name;
+  struct status_node* sp_status = sp_data->set_status;
   struct thread* t = thread_current();
   struct intr_frame if_;
   bool success, pcb_success;
@@ -96,6 +103,7 @@ static void start_process(void* file_name_) {
 
     list_init(&fm_list);
     t->pcb->fm_list = &fm_list;
+    new_pcb->my_status = sp_status;
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -121,8 +129,12 @@ static void start_process(void* file_name_) {
   palloc_free_page(file_name);
   if (!success) {
     sema_up(&temporary);
+    t->pcb->my_status->loaded = false;
     thread_exit();
+  } else {
+    t->pcb->my_status->loaded = true;
   }
+  sema_up(&t->pcb->my_status->load_sema);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
