@@ -57,19 +57,22 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
   sema_init(&temporary, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page(0);
+  // fn_copy = palloc_get_page(0);
+  fn_copy = malloc(PGSIZE);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
   struct start_process_data* sp_data = malloc(sizeof(struct start_process_data));
-  sp_data->file_name = fn_copy;
+  sp_data->file_name = malloc(PGSIZE);
+  strlcpy(sp_data->file_name, fn_copy, PGSIZE);
   sp_data->set_status = child;
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, start_process, sp_data);
-  if (tid == TID_ERROR)
-    palloc_free_page(fn_copy);
+  // if (tid == TID_ERROR)
+    // palloc_free_page(fn_copy);
+  free(fn_copy);
   return tid;
 }
 
@@ -129,9 +132,10 @@ static void start_process(void* data) {
   }
 
   /* Clean up. Exit on failure or jump to userspace */
-  palloc_free_page(file_name);
+  // palloc_free_page(file_name);
+  free(file_name);
+  free(sp_data);
   if (!success) {
-    sema_up(&temporary);
     if (t->pcb->my_status != NULL) {
       t->pcb->my_status->loaded = false;
     }
@@ -144,6 +148,7 @@ static void start_process(void* data) {
   if (t->pcb->my_status != NULL) {
     sema_up(&t->pcb->my_status->load_sema);
   }
+  sema_up(&temporary);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in

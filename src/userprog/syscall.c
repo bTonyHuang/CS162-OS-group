@@ -100,7 +100,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       size_t size = args[3];
 
       if (fd == 1) {
-        putbuf((void *) buffer, size);
+        putbuf(buffer, size);
         f->eax = size;
         break;
       }
@@ -144,7 +144,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       break;
     case SYS_WAIT:
       ;
-
+      break;
 
   }
 
@@ -211,7 +211,7 @@ bool valid_string(char *str) {
 	if (!is_user_vaddr(str)) {
 		return false;
 	}
-  char *kernel_page_str = pagedir_get_page(thread_current()->pagedir, (void *) str);
+  char *kernel_page_str = pagedir_get_page(thread_current()->pcb->pagedir, (void *) str);
 
   if (kernel_page_str == NULL) {
   	return false;
