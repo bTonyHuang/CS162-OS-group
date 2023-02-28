@@ -32,7 +32,21 @@ struct process {
   file_mapping_list* fm_list; // pintos list of fd->file* mappings
   int num_fds;
   // global lock for multiprocess file ops
+  
 };
+
+struct status_node {
+   struct semaphore load_sema;
+   struct semaphpre exit_sema;
+   lock_t global_lock;
+
+   pid_t pid;
+   bool loaded;
+   int exit_status;
+   int ref_count;
+
+   struct list_elem elem;
+}
 
 struct file_mapping {
   int fd;
