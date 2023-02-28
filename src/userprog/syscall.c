@@ -43,14 +43,17 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   /* printf("System call number: %d\n", args[0]); */
   switch(args[0]){
-    case SYS_EXIT:
+    case SYS_EXIT:    // syscall1(SYS_EXIT, status);
       f->eax = args[1];
       printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
       // close all fds
       free(thread_current()->pcb->fm_list);
-      int num_child_refs = list_size(thread_current()->pcb->cm_list);
 
-      if (num_child_refs > 0) {
+
+      /* if curr process is parent process w/ children, decrement ref_count and free/remove 
+        all children/status_nodes from its cm_list if it's no longer being referenced by a process  */
+      int num_child_refs = list_size(thread_current()->pcb->cm_list);
+      if (num_child_refs > 0) {     
         struct status_node* nodes_to_free[num_child_refs];
         child_mapping_list* cm_list_ptr = thread_current()->pcb->cm_list;
         struct list_elem* iter;
@@ -76,10 +79,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       }
       free(thread_current()->pcb->cm_list);
 
+      /* if curr process = child process, decrement ref_count and free its status_node 
+         (if it's not being referenced by parent process)
+         if child is being referenced by parent, store child's exit code and notify parent of its exit */
       struct status_node* my_status = thread_current()->pcb->my_status;
       if (my_status != NULL) {
-        my_status->exit_status = args[1];
-
         lock_acquire(my_status->status_lock);
         my_status->ref_count -= 1;
         lock_release(my_status->status_lock);
@@ -88,23 +92,23 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
           free(my_status->status_lock);
           free(my_status);
         } else {
+          my_status->exit_status = args[1];
           sema_up(&(my_status->exit_sema));
         }
       }
       
       process_exit();
       break;
-    case SYS_WRITE:
+    case SYS_WRITE:     // syscall3(SYS_WRITE, fd, buffer, size)
       fd = args[1];
       char* buffer = (char*) args[2];
       size_t size = args[3];
 
+      /* write buffer to stdout */
       if (fd == 1) {
         putbuf(buffer, size);
         f->eax = size;
-        break;
       }
-
       // f->eax = file_write(file_struct, buffer, size);
       break;
     case SYS_PRACTICE:
@@ -113,8 +117,10 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_HALT:
       shutdown_power_off();
       break;
-    case SYS_EXEC:
+    case SYS_EXEC:      // syscall1(SYS_EXEC, file)
       ;
+      /* allocate space for newly initalized lock and status_node for child 
+         add new status_node to parent process's cm_list */
       struct lock* new_lock = malloc(sizeof(struct lock));
       struct status_node* new_status = malloc(sizeof(struct status_node));
 
@@ -129,20 +135,23 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
       list_push_front(thread_current()->pcb->cm_list, &new_status->elem);
 
+      /* process_execute(executable, shared status_node to child process) creates a new child process 
+         parent sema downs to wait for child process to finish loading and exiting 
+         before executing rest of code and returning w/ child's pid */
       pid_t cpid = process_execute((const char *)  args[1], new_status);
       sema_down(&(new_status->load_sema));
       
       if (new_status->loaded) {
         f->eax = cpid;
+      /* if child doesn't load properly, remove itself from parent's cm_list + free its status_node */
       } else {
         f->eax = -1;
         list_remove(&new_status->elem);
         free(new_status->status_lock);
         free(new_status);
       }
-
       break;
-    case SYS_WAIT:
+    case SYS_WAIT:      // syscall1(SYS_WAIT, pid);
       ;
       break;
 

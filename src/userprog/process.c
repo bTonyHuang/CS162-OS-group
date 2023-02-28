@@ -63,6 +63,8 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
+  /* store status_node shared between parent + child and file_name in one struct
+     to be used in thread_create's thread func (start_process()) */
   struct start_process_data* sp_data = malloc(sizeof(struct start_process_data));
   sp_data->file_name = malloc(PGSIZE);
   strlcpy(sp_data->file_name, fn_copy, PGSIZE);
@@ -135,6 +137,7 @@ static void start_process(void* data) {
   // palloc_free_page(file_name);
   free(file_name);
   free(sp_data);
+  /* load results */
   if (!success) {
     if (t->pcb->my_status != NULL) {
       t->pcb->my_status->loaded = false;
@@ -145,6 +148,7 @@ static void start_process(void* data) {
       t->pcb->my_status->loaded = true;
     }
   }
+  /* if curr process running = child process, alert parent that it has loaded successfully */
   if (t->pcb->my_status != NULL) {
     sema_up(&t->pcb->my_status->load_sema);
   }
