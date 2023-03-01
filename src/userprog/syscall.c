@@ -153,6 +153,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       break;
     case SYS_WAIT:      // syscall1(SYS_WAIT, pid);
       ;
+      int result = process_wait(args[1]);
+      f->eax = result;
       break;
 
   }

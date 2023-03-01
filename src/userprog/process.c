@@ -174,8 +174,30 @@ static void start_process(void* data) {
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(pid_t child_pid UNUSED) {
+  struct process* pcb = thread_current()->pcb;
+  child_mapping_list* child_list = pcb->cm_list;
+
+  /* iterate thru each child status_node in parent process to find child w/ child_pid 
+     if found, parent waits for child process to finish running and return its exit status 
+     if child already terminated, */
+  struct list_elem* iter;
+  struct status_node* child;
+  for (iter = list_begin(child_list); iter != list_end(child_list); iter = list_next(iter)) {
+    child = list_entry(iter, struct status_node, elem);
+    if (child->pid == child_pid) {
+      sema_down(&child->exit_sema);
+      // ref_count ?
+      int exit_code = child->exit_status;
+      free(child->status_lock);
+      free(child);
+      return exit_code;
+    }
+  }
+  return -1;
+}
+
+void master_wait(pid_t child_pid UNUSED) {
   sema_down(&temporary);
-  return 0;
 }
 
 /* Free the current process's resources. */
