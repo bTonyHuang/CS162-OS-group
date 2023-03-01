@@ -34,6 +34,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   //   process_exit();
   // }
 
+  struct status_node* file_status = thread_current()->pcb->my_status; //thread that will aqcuire lock for files
+
   /*
    * The following print statement, if uncommented, will print out the syscall
    * number whenever a process enters a system call. You might find it useful
@@ -157,6 +159,32 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       f->eax = result;
       break;
 
+    case create:
+      lock_acquire(file_status->status_lock);
+      f->eax = filesys_create(arg[1], arg[2]);
+      lock_release(file_status->status_lock);
+      break;
+
+    case remove:
+      lock_acquire(file_status->status_lock);
+      f->eax = filesys_remove(arg[1]);
+      lock_release(file_status->status_lock);
+      break;
+
+    case open:
+      lock_acquire(file_status->status_lock);
+      f->eax = filesys_open(arg[1]);
+      lock_release(file_status->status_lock);
+
+      case filesize:
+        lock_acquire(file_status->status_lock);
+
+        struct file* file_struct;
+        file_struct = find_file(thread_current()->pcb, fd);
+
+        f->eax = file_length(file_struct);
+
+        lock_release(file_status->status_lock);
   }
 
   //original version
