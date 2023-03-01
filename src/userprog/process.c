@@ -25,6 +25,7 @@ static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
+void master_wait(pid_t child_pid UNUSED);
 
 /* Initializes user programs in the system by ensuring the main
    thread has a minimal PCB so that it can execute and wait for
@@ -170,7 +171,6 @@ static void start_process(void* data) {
    child of the calling process, or if process_wait() has already
    been successfully called for the given PID, returns -1
    immediately, without waiting.
-
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(pid_t child_pid UNUSED) {
@@ -488,15 +488,11 @@ static bool validate_segment(const struct Elf32_Phdr* phdr, struct file* file) {
 /* Loads a segment starting at offset OFS in FILE at address
    UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
    memory are initialized, as follows:
-
         - READ_BYTES bytes at UPAGE must be read from FILE
           starting at offset OFS.
-
         - ZERO_BYTES bytes at UPAGE + READ_BYTES must be zeroed.
-
    The pages initialized by this function must be writable by the
    user process if WRITABLE is true, read-only otherwise.
-
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
 static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t read_bytes,
@@ -656,7 +652,6 @@ pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
    Stores the thread's entry point into *EIP and its initial stack
    pointer into *ESP. Handles all cleanup if unsuccessful. Returns
    true if successful, false otherwise.
-
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. You may find it necessary to change the
    function signature. */
@@ -667,7 +662,6 @@ bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; 
    scheduled (and may even exit) before pthread_execute () returns.
    Returns the new thread's TID or TID_ERROR if the thread cannot
    be created properly.
-
    This function will be implemented in Project 2: Multithreading and
    should be similar to process_execute (). For now, it does nothing.
    */
@@ -676,7 +670,6 @@ tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSE
 /* A thread function that creates a new user thread and starts it
    running. Responsible for adding itself to the list of threads in
    the PCB.
-
    This function will be implemented in Project 2: Multithreading and
    should be similar to start_process (). For now, it does nothing. */
 static void start_pthread(void* exec_ UNUSED) {}
@@ -685,7 +678,6 @@ static void start_pthread(void* exec_ UNUSED) {}
    in the same process and has not been waited on yet. Returns TID on
    success and returns TID_ERROR on failure immediately, without
    waiting.
-
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
 tid_t pthread_join(tid_t tid UNUSED) { return -1; }
@@ -693,10 +685,8 @@ tid_t pthread_join(tid_t tid UNUSED) { return -1; }
 /* Free the current thread's resources. Most resources will
    be freed on thread_exit(), so all we have to do is deallocate the
    thread's userspace stack. Wake any waiters on this thread.
-
    The main thread should not use this function. See
    pthread_exit_main() below.
-
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
 void pthread_exit(void) {}
@@ -706,7 +696,6 @@ void pthread_exit(void) {}
    terminate properly, before exiting itself. When it exits itself, it
    must terminate the process in addition to all necessary duties in
    pthread_exit.
-
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
 void pthread_exit_main(void) {}

@@ -7,6 +7,7 @@
 #include "userprog/process.h"
 #include "threads/malloc.h"
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "devices/shutdown.h"
@@ -20,32 +21,25 @@ void validate_pointer(uint32_t* eax_register, void* ptr, size_t size);
 bool valid_string(char* ustr);
 void graceful_exception_exit(int status);
 
-void syscall_init(void) { intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall"); }
+struct lock file_operations_lock;
+
+void syscall_init(void) {
+  intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
+  lock_init(&file_operations_lock);
+}
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
   uint32_t* args = ((uint32_t*)f->esp);
   int fd;
   validate_pointer(&f->eax, args, sizeof(uint32_t));
 
-
-  // bool valid_ptr = valid_pointer(args, 4);
-  // if (!valid_ptr) {
-  //   f->eax = -1;
-  //   process_exit();
-  // }
-
   struct status_node* file_status = thread_current()->pcb->my_status; //thread that will aqcuire lock for files
 
-  /*
-   * The following print statement, if uncommented, will print out the syscall
-   * number whenever a process enters a system call. You might find it useful
-   * when debugging. It will cause tests to fail, however, so you should not
-   * include it in your final submission.
-   */
+  // printf("System call number: %d\n", args[0]); // for debugging purposes */
 
-  /* printf("System call number: %d\n", args[0]); */
-  switch(args[0]){
-    case SYS_EXIT:    // syscall1(SYS_EXIT, status);
+  switch(args[0]) {
+    case SYS_EXIT: {
+      /* syscall1(SYS_EXIT, status); */
       f->eax = args[1];
       printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
       // close all fds
@@ -100,180 +94,10 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       }
       
       process_exit();
-      break;
-
-    //file operations : create, remove, open, filesize, read, write, seek, tell and close
-    case SYS_CREATE:  //bool create (const char *file, unsigned initial_size)
-      //validation check
-      off_t size=(off_t)args[2];
-      if(!args[1]||size<=0){
-        f->eax=false;
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      f->eax = filesys_create(args[1], size);
-      lock_release(file_status->status_lock);
-      break;
-
-    case SYS_REMOVE: //bool remove (const char *file)
-      //validation check
-      if(!args[1]){
-        f->eax=false;
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      f->eax = filesys_remove(args[1]);
-      lock_release(file_status->status_lock);
-      break;
-
-    case SYS_OPEN: //int open (const char *file)
-       //validation check
-      if(!args[1]){
-        f->eax = -1;
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      struct file * new_file = filesys_open(args[1]);//return file*
-      if(new_file){
-        f->eax = add_file(new_file);
-      }
-      else{
-        f->eax = -1;
-      }
-      lock_release(file_status->status_lock);
-      break;
-
-    case SYS_FILESIZE: //int filesize (int fd)
-      int fd = args[1];
-      if(fd<3){//0,1,2 - stdin ...
-        f->eax=-1;
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      
-      struct file* file_struct;
-      file_struct = find_file(thread_current()->pcb, fd);
-      if(!file_struct){
-        f->eax=-1;//Returns -1 if fd does not correspond to an entry in the file descriptor table.
-        break;
-      }
-      f->eax = file_length(file_struct);
-
-      lock_release(file_status->status_lock);
-      break;
-
-    case SYS_READ: //int read (int fd, void *buffer, unsigned size)
-      //validation check
-      off_t size = (off_t)args[3];
-      if(!args[2]||size<0){
-        f->eax = -1;
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      
-      lock_release(file_status->status_lock);
-      break;
-  
-    case SYS_WRITE:  //int write (int fd, const void *buffer, unsigned size)
-      fd = args[1];
-      char* buffer = (char*) args[2];
-      size_t size = args[3];
-
-      /* write buffer to stdout */
-      if (fd == 1) {
-        putbuf(buffer, size);
-        f->eax = size;
-      }
-      // f->eax = file_write(file_struct, buffer, size);
-      break;
-
-    case SYS_SEEK: //void seek (int fd, unsigned position)
-      int fd = args[1];
-      off_t position = (off_t)args[2];
-      if(fd < 0 || position < 0){
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      switch(fd){
-        case 0://stdin
-          file_seek(stdin,position);
-          break;
-
-        case 1://stdout
-          file_seek(stdout,position);
-          break;
-
-        case 2://stderr
-          file_seek(stderr,position);
-          break;          
-
-        default:
-          struct file* target_file=find_file(thread_current()->pcb,fd);
-          if(!target_file)
-            break;
-          file_seek(target_file,position);
-          break;
-      }
-      lock_release(file_status->status_lock);
-      break;
-    
-    case SYS_TELL://unsigned tell(int fd)
-      int fd = args[1];
-      //Returns -1 if fd does not correspond to an entry in the file descriptor table.
-      if(fd < 0){
-        f->eax=-1;
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      switch(fd){
-        case 0://stdin
-          f->eax=file_tell(stdin);
-          break;
-
-        case 1://stdout
-          f->eax=file_tell(stdout);
-          break;
-
-        case 2://stderr
-           f->eax=file_tell(stderr);
-          break;          
-
-        default:
-          struct file* target_file=find_file(thread_current()->pcb,fd);
-          if(!target_file){
-            f->eax=-1;
-            break;
-          }
-          f->eax=file_tell(target_file);
-          break;
-      }
-      lock_release(file_status->status_lock);
-      break;
-    case SYS_CLOSE: //void close (int fd)
-      int fd = args[1];
-      if(fd < 0){
-        break;
-      }
-      lock_acquire(file_status->status_lock);
-      struct file* target_file=find_file(thread_current()->pcb,fd);
-      if(!target_file){
-        break;
-      }
-      file_close(target_file);
-      lock_release(file_status->status_lock);
-      break;
-
-    //practice syscall
-    case SYS_PRACTICE:
-      f->eax = args[1] + 1;
-      break;
-
-    case SYS_HALT:
-      shutdown_power_off();
-      break;
-
-    case SYS_EXEC:      // syscall1(SYS_EXEC, file)
-      ;
+    } break;
+    case SYS_EXEC: {
+      /* syscall1(SYS_EXEC, file) */
+      // validate_string(&f->eax, (char *) args[1]);
       /* allocate space for newly initalized lock and status_node for child 
          add new status_node to parent process's cm_list */
       struct lock* new_lock = malloc(sizeof(struct lock));
@@ -305,13 +129,195 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         free(new_status->status_lock);
         free(new_status);
       }
-      break;
-
-    case SYS_WAIT:      // syscall1(SYS_WAIT, pid);
-      ;
+    } break;
+    case SYS_WAIT: {
+      /* syscall1(SYS_WAIT, pid); */
       int result = process_wait(args[1]);
       f->eax = result;
+    } break;
+    case SYS_CREATE: {
+      /* bool create (const char *file, unsigned initial_size) */
+      off_t size=(off_t)args[2];
+      if(!args[1]||size<=0){
+        graceful_exception_exit(-1);
+      }
+      lock_acquire(&file_operations_lock);
+      f->eax = filesys_create((const char*) args[1], size);
+      lock_release(&file_operations_lock);
+    } break;
+    case SYS_REMOVE: {
+      //bool remove (const char *file)
+      //validation check
+      // if(!args[1]){
+      //   f->eax=false;
+      //   break;
+      // }
+      // validate_string(&f->eax, (char *)args[1]);
+
+      lock_acquire(&file_operations_lock);
+      f->eax = filesys_remove((const char *) args[1]);
+      lock_release(&file_operations_lock);
+    } break;
+    case SYS_OPEN: {
+      /* int open (const char *file) */
+      //validation check
+      if(!args[1]){
+        f->eax = -1;
+        break;
+      }
+      lock_acquire(&file_operations_lock);
+      struct file* new_file = filesys_open((const char *) args[1]);//return file*
+      if(new_file){
+        f->eax = add_file(new_file);
+      }
+      else{
+        f->eax = -1;
+      }
+      lock_release(&file_operations_lock);
+    } break;
+    case SYS_FILESIZE: {
+      /* int filesize (int fd) */
+      int fd = args[1];
+      if(fd<3){//0,1,2 - stdin ...
+        f->eax=-1;
+        break;
+      }
+      lock_acquire(&file_operations_lock);
+      
+      struct file* file_struct;
+      file_struct = find_file(thread_current()->pcb, fd);
+      if(!file_struct){
+        f->eax=-1;//Returns -1 if fd does not correspond to an entry in the file descriptor table.
+        break;
+      }
+      f->eax = file_length(file_struct);
+
+      lock_release(&file_operations_lock);
+    } break;
+    case SYS_READ: {
+      //int read (int fd, void *buffer, unsigned size)
+      //validation check
+      off_t size = (off_t)args[3];
+      if(!args[2]||size<0){
+        f->eax = -1;
+        break;
+      }
+      lock_acquire(&file_operations_lock);
+      
+      lock_release(&file_operations_lock);
+    } break;
+    case SYS_WRITE: {
+      //int write (int fd, const void *buffer, unsigned size)
+      fd = args[1];
+      char* buffer = (char*) args[2];
+      size_t size = args[3];
+
+      // if (fd <= 0 || fd > thread_current()->pcb->num_fds) {
+      //   /* Invalid fd, error and exit process */
+      //   thread_current()->pcb->my_status->exit_status = -1;
+      //   process_exit();
+		  // }
+
+      if (fd == 1) {
+        /* Write buffer to stdout */
+        putbuf((void *) buffer, size);
+        f->eax = size;
+      } else {
+        validate_pointer(&f->eax, (void *) args[2], (size_t) args[3]);
+        struct file* file = find_file(thread_current()->pcb, fd);
+
+        if (file == NULL) {
+          f->eax = -1;
+        } else {
+          lock_acquire (&file_operations_lock);
+          f->eax = file_write(file, (void *) args[2], (off_t) args[3]);
+          lock_release (&file_operations_lock);
+        }
+      } 
+    } break;
+
+    // case SYS_SEEK: //void seek (int fd, unsigned position)
+    //   int fd = args[1];
+    //   off_t position = (off_t)args[2];
+    //   if(fd < 0 || position < 0){
+    //     break;
+    //   }
+    //   lock_acquire(file_status->status_lock);
+    //   switch(fd){
+    //     case 0://stdin
+    //       file_seek(stdin,position);
+    //       break;
+
+    //     case 1://stdout
+    //       file_seek(stdout,position);
+    //       break;
+
+    //     case 2://stderr
+    //       file_seek(stderr,position);
+    //       break;          
+
+    //     default:
+    //       struct file* target_file=find_file(thread_current()->pcb,fd);
+    //       if(!target_file)
+    //         break;
+    //       file_seek(target_file,position);
+    //       break;
+    //   }
+    //   lock_release(file_status->status_lock);
+    //   break;
+    
+    // case SYS_TELL://unsigned tell(int fd)
+    //   int fd = args[1];
+    //   //Returns -1 if fd does not correspond to an entry in the file descriptor table.
+    //   if(fd < 0){
+    //     f->eax=-1;
+    //     break;
+    //   }
+    //   lock_acquire(file_status->status_lock);
+    //   switch(fd){
+    //     case 0://stdin
+    //       f->eax=file_tell(stdin);
+    //       break;
+
+    //     case 1://stdout
+    //       f->eax=file_tell(stdout);
+    //       break;
+
+    //     case 2://stderr
+    //        f->eax=file_tell(stderr);
+    //       break;          
+
+    //     default:
+    //       struct file* target_file=find_file(thread_current()->pcb,fd);
+    //       if(!target_file){
+    //         f->eax=-1;
+    //         break;
+    //       }
+    //       f->eax=file_tell(target_file);
+    //       break;
+    //   }
+    //   lock_release(file_status->status_lock);
+    //   break;
+    // case SYS_CLOSE: //void close (int fd)
+      int fd = args[1];
+      if(fd < 0){
+        break;
+      }
+      lock_acquire(file_status->status_lock);
+      struct file* target_file=find_file(thread_current()->pcb,fd);
+      if(!target_file){
+        break;
+      }
+      file_close(target_file);
+      lock_release(file_status->status_lock);
       break;
+
+    case SYS_PRACTICE: {
+      f->eax = args[1] + 1;
+    } break;
+    case SYS_HALT: {
+      shutdown_power_off();
+    } break;
   }
 
   //original version
@@ -413,5 +419,4 @@ bool valid_string(char *str) {
 //   }
 //   return false;
 // }
-
 
