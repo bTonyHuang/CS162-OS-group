@@ -20,6 +20,7 @@ bool valid_pointer(void* uaddr, size_t size);
 void validate_pointer(uint32_t* eax_register, void* ptr, size_t size);
 bool valid_string(char* ustr);
 void graceful_exception_exit(int status);
+void validate_string(char *str);
 
 struct lock file_operations_lock;
 
@@ -44,7 +45,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
       // close all fds
       free(thread_current()->pcb->fm_list);
-
 
       /* if curr process is parent process w/ children, decrement ref_count and free/remove 
         all children/status_nodes from its cm_list if it's no longer being referenced by a process  */
@@ -79,25 +79,24 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
          (if it's not being referenced by parent process)
          if child is being referenced by parent, store child's exit code and notify parent of its exit */
       struct status_node* my_status = thread_current()->pcb->my_status;
-      if (my_status != NULL) {
-        lock_acquire(my_status->status_lock);
-        my_status->ref_count -= 1;
-        lock_release(my_status->status_lock);
+      lock_acquire(my_status->status_lock);
+      my_status->ref_count -= 1;
+      lock_release(my_status->status_lock);
 
-        if (my_status->ref_count == 0) {
-          free(my_status->status_lock);
-          free(my_status);
-        } else {
-          my_status->exit_status = args[1];
-          sema_up(&(my_status->exit_sema));
-        }
+      if (my_status->ref_count == 0) {
+        free(my_status->status_lock);
+        free(my_status);
+      } else {
+        my_status->exit_status = args[1];
+        sema_up(&(my_status->exit_sema));
       }
       
       process_exit();
     } break;
     case SYS_EXEC: {
       /* syscall1(SYS_EXEC, file) */
-      // validate_string(&f->eax, (char *) args[1]);
+      validate_pointer(&f->eax, args, sizeof(uint32_t) * 2);
+      validate_string((char *) args[1]);
       /* allocate space for newly initalized lock and status_node for child 
          add new status_node to parent process's cm_list */
       struct lock* new_lock = malloc(sizeof(struct lock));
@@ -117,7 +116,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       /* process_execute(executable, shared status_node to child process) creates a new child process 
          parent sema downs to wait for child process to finish loading and exiting 
          before executing rest of code and returning w/ child's pid */
-      pid_t cpid = process_execute((const char *)  args[1], new_status);
+      pid_t cpid = process_execute((const char *) args[1], new_status);
       sema_down(&(new_status->load_sema));
       
       if (new_status->loaded) {
@@ -372,17 +371,17 @@ void validate_pointer(uint32_t* eax_register, void* ptr, size_t size) {
 		*eax_register = -1;
 		printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
 		thread_current()->pcb->my_status->exit_status = -1;
+    sema_up(&thread_current()->pcb->my_status->exit_sema);
 	  process_exit();
 	  NOT_REACHED();
 	}
 }
 
 void graceful_exception_exit(int status) {
-  if (thread_current()->pcb->my_status != NULL) {
-    thread_current()->pcb->my_status->exit_status = status;
-  }
+  thread_current()->pcb->my_status->exit_status = status;
 
   printf("%s: exit(%d)\n", thread_current()->pcb->process_name, status);
+  sema_up(&thread_current()->pcb->my_status->exit_sema);
   process_exit();
 }
 
@@ -395,13 +394,21 @@ bool valid_string(char *str) {
   if (kernel_page_str == NULL) {
   	return false;
   } else {
-  	char *final_str = str + strlen(kernel_page_str) + 1;
+  	char *final_str = str + strlen(kernel_page_str);
   	if (!is_user_vaddr(final_str) || pagedir_get_page(thread_current()->pcb->pagedir, final_str) == NULL) {
       return false;
   	}
   }
-
 	return true;
+}
+
+void validate_string(char *str) {
+  if (!valid_string(str)) {
+    thread_current()->pcb->my_status->exit_status = -1;
+    printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
+    sema_up(&thread_current()->pcb->my_status->exit_sema);
+    process_exit();
+  }
 }
 
 // bool valid_pointer(void* ptr, size_t size) {

@@ -20,7 +20,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-static struct semaphore temporary;
+// static struct semaphore temporary;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
 static bool load(const char* file_name, void (**eip)(void), void** esp);
@@ -55,7 +55,7 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
   char* fn_copy;
   tid_t tid;
 
-  sema_init(&temporary, 0);
+  // sema_init(&temporary, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   // fn_copy = palloc_get_page(0);
@@ -73,6 +73,7 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, start_process, sp_data);
+  child->pid = tid;
   // if (tid == TID_ERROR)
     // palloc_free_page(fn_copy);
   free(fn_copy);
@@ -112,7 +113,23 @@ static void start_process(void* data) {
     list_init(cm_list);
     t->pcb->fm_list = fm_list;
     t->pcb->cm_list = cm_list;
+
+    /* Process was not birthed by a parent, but we want a non-NULL my_status anyways for less hassle. */
+    if (sp_status == NULL) {
+      struct lock* new_lock = malloc(sizeof(struct lock));
+      sp_status = malloc(sizeof(struct status_node));
+      sema_init(&(sp_status->load_sema), 0);
+      sema_init(&(sp_status->exit_sema), 0);
+      lock_init(new_lock);
+      sp_status->status_lock = new_lock;
+      sp_status->loaded = false;
+      sp_status->exit_status = -1;
+      sp_status->ref_count = 1;
+    }
+
     t->pcb->my_status = sp_status;
+
+
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -124,6 +141,22 @@ static void start_process(void* data) {
     success = load(file_name, &if_.eip, &if_.esp);
   }
 
+  /* Clean up. Exit on failure or jump to userspace */
+  // palloc_free_page(file_name);
+  free(file_name);
+  free(sp_data);
+  /* load results */
+  if (!success) {
+    t->pcb->my_status->loaded = false;
+    sema_up(&t->pcb->my_status->load_sema);
+    thread_exit();
+  } else {
+    t->pcb->my_status->loaded = true;
+  }
+  /* if curr process running = child process, alert parent that it has loaded successfully */
+  sema_up(&t->pcb->my_status->load_sema);
+  // sema_up(&temporary);
+
   /* Handle failure with succesful PCB malloc. Must free the PCB */
   if (!success && pcb_success) {
     // Avoid race where PCB is freed before t->pcb is set to NULL
@@ -133,27 +166,6 @@ static void start_process(void* data) {
     t->pcb = NULL;
     free(pcb_to_free);
   }
-
-  /* Clean up. Exit on failure or jump to userspace */
-  // palloc_free_page(file_name);
-  free(file_name);
-  free(sp_data);
-  /* load results */
-  if (!success) {
-    if (t->pcb->my_status != NULL) {
-      t->pcb->my_status->loaded = false;
-    }
-    thread_exit();
-  } else {
-    if (t->pcb->my_status != NULL) {
-      t->pcb->my_status->loaded = true;
-    }
-  }
-  /* if curr process running = child process, alert parent that it has loaded successfully */
-  if (t->pcb->my_status != NULL) {
-    sema_up(&t->pcb->my_status->load_sema);
-  }
-  sema_up(&temporary);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -182,23 +194,33 @@ int process_wait(pid_t child_pid UNUSED) {
      if child already terminated, */
   struct list_elem* iter;
   struct status_node* child;
+  bool found_child = false;
+  int exit_code;
+
   for (iter = list_begin(child_list); iter != list_end(child_list); iter = list_next(iter)) {
     child = list_entry(iter, struct status_node, elem);
     if (child->pid == child_pid) {
+      found_child = true;
       sema_down(&child->exit_sema);
-      // ref_count ?
-      int exit_code = child->exit_status;
-      free(child->status_lock);
-      free(child);
-      return exit_code;
+      exit_code = child->exit_status;
+      list_remove(&child->elem);
+      /* No need to update or check ref_count, if we're here then our child has already exited, get rid of child node. */
+      break;
     }
   }
+
+  if (found_child) {
+    free(child->status_lock);
+    free(child);
+    return exit_code;
+  }
+
   return -1;
 }
 
-void master_wait(pid_t child_pid UNUSED) {
-  sema_down(&temporary);
-}
+// void master_wait(pid_t child_pid UNUSED) {
+//   sema_down(&temporary);
+// }
 
 /* Free the current process's resources. */
 void process_exit(void) {
@@ -237,7 +259,7 @@ void process_exit(void) {
   cur->pcb = NULL;
   free(pcb_to_free);
 
-  sema_up(&temporary);
+  // sema_up(&temporary);
   thread_exit();
 }
 
@@ -339,9 +361,10 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   int totalLength = strlen(file_name);
   char file_executable[totalLength + 1];
   strlcpy(file_executable, file_name, totalLength + 1);
+  file_executable[totalLength] = '\0';
 
   for (i = 0; i < totalLength; i++){
-    if (file_executable[i] == ' '){
+    if (file_executable[i] == ' ') {
       file_executable[i] = '\0';
       break;
     }

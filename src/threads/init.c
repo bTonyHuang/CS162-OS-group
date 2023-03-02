@@ -312,7 +312,26 @@ static void run_task(char** argv) {
 
   printf("Executing '%s':\n", task);
 #ifdef USERPROG
-  master_wait(process_execute(task, NULL));
+  child_mapping_list* cm_list = malloc(sizeof(struct list));
+  list_init(cm_list);
+  thread_current()->pcb->cm_list = cm_list;
+
+  struct lock* new_lock = malloc(sizeof(struct lock));
+  struct status_node* new_status = malloc(sizeof(struct status_node));
+
+  sema_init(&(new_status->load_sema), 0);
+  sema_init(&(new_status->exit_sema), 0);
+  lock_init(new_lock);
+  new_status->status_lock = new_lock;
+
+  new_status->loaded = false;
+  new_status->exit_status = -1;
+  new_status->ref_count = 2;
+
+  list_push_front(thread_current()->pcb->cm_list, &new_status->elem);
+  pid_t cpid = process_execute(task, new_status);
+
+  process_wait(cpid);
 #endif
   printf("Execution of '%s' complete.\n", task);
 }
