@@ -105,6 +105,7 @@ static void start_process(void* data) {
     // Continue initializing the PCB as normal
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+    t->pcb->fd_counter = 3;
 
     file_mapping_list* fm_list = malloc(sizeof(struct list));
     child_mapping_list* cm_list = malloc(sizeof(struct list));
@@ -228,6 +229,14 @@ void process_exit(void) {
   uint32_t* pd;
 
   file_close(cur->file_executable);
+
+  /*******************
+
+
+  CLOSE THEM FD_MAPPINGS
+
+
+  ********************/
 
   /* If this thread does not have a PCB, don't worry */
   if (cur->pcb == NULL) {

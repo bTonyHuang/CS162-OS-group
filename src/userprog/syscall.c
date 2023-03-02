@@ -18,9 +18,9 @@ struct file* find_file(struct process* p, int fd);
 int add_file(struct file* new_file);
 bool valid_pointer(void* uaddr, size_t size);
 void validate_pointer(uint32_t* eax_register, void* ptr, size_t size);
-bool valid_string(char* ustr);
+bool valid_string(const char* ustr);
 void graceful_exception_exit(int status);
-void validate_string(char *str);
+void validate_string(const char *str);
 
 struct lock file_operations_lock;
 
@@ -43,7 +43,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       /* syscall1(SYS_EXIT, status); */
       f->eax = args[1];
       printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
-      // close all fds
+
       free(thread_current()->pcb->fm_list);
 
       /* if curr process is parent process w/ children, decrement ref_count and free/remove 
@@ -96,7 +96,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_EXEC: {
       /* syscall1(SYS_EXEC, file) */
       validate_pointer(&f->eax, args, sizeof(uint32_t) * 2);
-      validate_string((char *) args[1]);
+      validate_string((const char *) args[1]);
       /* allocate space for newly initalized lock and status_node for child 
          add new status_node to parent process's cm_list */
       struct lock* new_lock = malloc(sizeof(struct lock));
@@ -136,10 +136,13 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     } break;
     case SYS_CREATE: {
       /* bool create (const char *file, unsigned initial_size) */
-      off_t size=(off_t)args[2];
-      if(!args[1]||size<=0){
+      const char* file_name = (const char*) args[1];
+      off_t size = (off_t) args[2];
+      validate_string(file_name);
+      if(size < 0){
         graceful_exception_exit(-1);
       }
+
       lock_acquire(&file_operations_lock);
       f->eax = filesys_create((const char*) args[1], size);
       lock_release(&file_operations_lock);
@@ -160,16 +163,14 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_OPEN: {
       /* int open (const char *file) */
       //validation check
-      if(!args[1]){
-        f->eax = -1;
-        break;
-      }
+      const char* file_name = (const char*) args[1];
+      validate_string(file_name);
+
       lock_acquire(&file_operations_lock);
-      struct file* new_file = filesys_open((const char *) args[1]);//return file*
-      if(new_file){
+      struct file* new_file = filesys_open(file_name);
+      if (new_file){
         f->eax = add_file(new_file);
-      }
-      else{
+      } else {
         f->eax = -1;
       }
       lock_release(&file_operations_lock);
@@ -234,38 +235,32 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         }
       } 
     } break;
-
-    // case SYS_SEEK: //void seek (int fd, unsigned position)
+    // case SYS_SEEK: {
+    //   //void seek (int fd, unsigned position)
     //   int fd = args[1];
     //   off_t position = (off_t)args[2];
     //   if(fd < 0 || position < 0){
     //     break;
     //   }
     //   lock_acquire(file_status->status_lock);
-    //   switch(fd){
-    //     case 0://stdin
-    //       file_seek(stdin,position);
-    //       break;
-
-    //     case 1://stdout
-    //       file_seek(stdout,position);
-    //       break;
-
-    //     case 2://stderr
-    //       file_seek(stderr,position);
-    //       break;          
-
-    //     default:
-    //       struct file* target_file=find_file(thread_current()->pcb,fd);
-    //       if(!target_file)
-    //         break;
+    //   if (fd == 0) {
+    //     //stdin
+    //     file_seek(stdin,position);
+    //   } else if (fd == 1) {
+    //     // stdout
+    //     file_seek(stdout,position);
+    //   } else if (fd == 2) {
+    //     file_seek(stderr,position);
+    //   } else {
+    //     struct file* target_file=find_file(thread_current()->pcb,fd);
+    //     if(target_file) {
     //       file_seek(target_file,position);
-    //       break;
+    //     }
     //   }
     //   lock_release(file_status->status_lock);
-    //   break;
-    
-    // case SYS_TELL://unsigned tell(int fd)
+    // } break;
+    // case SYS_TELL: {
+    //   //unsigned tell(int fd)
     //   int fd = args[1];
     //   //Returns -1 if fd does not correspond to an entry in the file descriptor table.
     //   if(fd < 0){
@@ -294,10 +289,11 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     //       }
     //       f->eax=file_tell(target_file);
     //       break;
-    //   }
+    //     }
     //   lock_release(file_status->status_lock);
-    //   break;
-    // case SYS_CLOSE: //void close (int fd)
+    // } break;
+    case SYS_CLOSE: {
+      //void close (int fd)
       int fd = args[1];
       if(fd < 0){
         break;
@@ -309,8 +305,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       }
       file_close(target_file);
       lock_release(file_status->status_lock);
-      break;
-
+    } break;
     case SYS_PRACTICE: {
       f->eax = args[1] + 1;
     } break;
@@ -318,14 +313,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       shutdown_power_off();
     } break;
   }
-
-  //original version
-  // if (args[0] == SYS_EXIT) {
-  //   f->eax = args[1];
-  //   printf("%s: exit(%d)\n", thread_current()->pcb->process_name, args[1]);
-  //   process_exit();
-  //     reak;
-  // }
 }
 
 struct file* find_file(struct process* p, int fd){
@@ -353,7 +340,8 @@ int add_file(struct file* new_file) {
   struct process* p = thread_current()->pcb;
   struct file_mapping* f = malloc(sizeof(struct file_mapping));
   f->file_struct_ptr = new_file;
-  f->fd = p->num_fds++;
+  f->fd = p->fd_counter;
+  p->fd_counter += 1;
   list_push_back(p->fm_list, &f->elem);
   return f->fd;
 }
@@ -385,7 +373,7 @@ void graceful_exception_exit(int status) {
   process_exit();
 }
 
-bool valid_string(char *str) {
+bool valid_string(const char *str) {
 	if (!is_user_vaddr(str)) {
 		return false;
 	}
@@ -394,7 +382,7 @@ bool valid_string(char *str) {
   if (kernel_page_str == NULL) {
   	return false;
   } else {
-  	char *final_str = str + strlen(kernel_page_str);
+  	char *final_str = (char *) str + strlen(kernel_page_str);
   	if (!is_user_vaddr(final_str) || pagedir_get_page(thread_current()->pcb->pagedir, final_str) == NULL) {
       return false;
   	}
@@ -402,7 +390,7 @@ bool valid_string(char *str) {
 	return true;
 }
 
-void validate_string(char *str) {
+void validate_string(const char *str) {
   if (!valid_string(str)) {
     thread_current()->pcb->my_status->exit_status = -1;
     printf("%s: exit(%d)\n", thread_current()->pcb->process_name, -1);
