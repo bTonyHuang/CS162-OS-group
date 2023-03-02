@@ -20,6 +20,10 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+//to pass the multi-oom test
+static int process_num = 1;
+const int PROCESS_NUM_LIMIT = 32;
+
 // static struct semaphore temporary;
 static thread_func start_process NO_RETURN;
 static thread_func start_pthread NO_RETURN;
@@ -52,6 +56,11 @@ void userprog_init(void) {
    before process_execute() returns.  Returns the new process's
    process id, or TID_ERROR if the thread cannot be created. */
 pid_t process_execute(const char* file_name, struct status_node* child) {
+
+  if (process_num == PROCESS_NUM_LIMIT)
+        return TID_ERROR;
+    ++process_num;
+
   char* fn_copy;
   tid_t tid;
 
@@ -59,15 +68,19 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   // fn_copy = palloc_get_page(0);
-  fn_copy = malloc(PGSIZE);
+  fn_copy = calloc(1,PGSIZE);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
   /* store status_node shared between parent + child and file_name in one struct
      to be used in thread_create's thread func (start_process()) */
-  struct start_process_data* sp_data = malloc(sizeof(struct start_process_data));
-  sp_data->file_name = malloc(PGSIZE);
+  struct start_process_data* sp_data = calloc(1,sizeof(struct start_process_data));
+  if (sp_data == NULL)
+    return TID_ERROR;
+  sp_data->file_name = calloc(1,PGSIZE);
+  if (sp_data->file_name == NULL)
+    return TID_ERROR;
   strlcpy(sp_data->file_name, fn_copy, PGSIZE);
   sp_data->set_status = child;
 
@@ -92,7 +105,7 @@ static void start_process(void* data) {
   bool success, pcb_success;
 
   /* Allocate process control block */
-  struct process* new_pcb = malloc(sizeof(struct process));
+  struct process* new_pcb = calloc(1,sizeof(struct process));
   success = pcb_success = new_pcb != NULL;
 
   /* Initialize process control block */
@@ -107,8 +120,10 @@ static void start_process(void* data) {
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
     t->pcb->fd_counter = 3;
 
-    file_mapping_list* fm_list = malloc(sizeof(struct list));
-    child_mapping_list* cm_list = malloc(sizeof(struct list));
+    file_mapping_list* fm_list = calloc(1,sizeof(struct list));
+    success = pcb_success = fm_list != NULL;
+    child_mapping_list* cm_list = calloc(1,sizeof(struct list));
+    success = pcb_success = cm_list != NULL;
 
     list_init(fm_list);
     list_init(cm_list);
@@ -117,8 +132,10 @@ static void start_process(void* data) {
 
     /* Process was not birthed by a parent, but we want a non-NULL my_status anyways for less hassle. */
     if (sp_status == NULL) {
-      struct lock* new_lock = malloc(sizeof(struct lock));
-      sp_status = malloc(sizeof(struct status_node));
+      struct lock* new_lock = calloc(1,sizeof(struct lock));
+      success = pcb_success = new_lock != NULL;
+      sp_status = calloc(1,sizeof(struct status_node));
+      success = pcb_success = sp_status != NULL;
       sema_init(&(sp_status->load_sema), 0);
       sema_init(&(sp_status->exit_sema), 0);
       lock_init(new_lock);
@@ -228,6 +245,7 @@ void process_exit(void) {
   struct thread* cur = thread_current();
   uint32_t* pd;
 
+  file_allow_write(cur->file_executable);
   file_close(cur->file_executable);
 
   /*******************

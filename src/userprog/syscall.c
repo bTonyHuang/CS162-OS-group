@@ -12,6 +12,16 @@
 #include "userprog/pagedir.h"
 #include "devices/shutdown.h"
 #include "threads/synch.h"
+#include "lib/float.h"
+
+#define CALLOC_ASSERT(CONDITION)     \
+    if (CONDITION)                   \
+    {                                \
+    }                                \
+    else                             \
+    {                                \
+        graceful_exception_exit(-1); \
+    }
 
 static void syscall_handler(struct intr_frame*);
 struct file* find_file(struct process* p, int fd);
@@ -97,8 +107,10 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       validate_string((const char *) args[1]);
       /* allocate space for newly initalized lock and status_node for child 
          add new status_node to parent process's cm_list */
-      struct lock* new_lock = malloc(sizeof(struct lock));
-      struct status_node* new_status = malloc(sizeof(struct status_node));
+      struct lock* new_lock = calloc(1,sizeof(struct lock));
+      CALLOC_ASSERT(new_lock!=NULL);
+      struct status_node* new_status = calloc(1,sizeof(struct status_node));
+      CALLOC_ASSERT(new_status!=NULL);
 
       sema_init(&(new_status->load_sema), 0);
       sema_init(&(new_status->exit_sema), 0);
@@ -203,6 +215,14 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         break;
       }
 
+      if (fd == STDIN_FILENO){
+        uint8_t *c = buffer;
+        for (int i = 0; i != size; ++i)
+          *c++ = input_getc();
+        f->eax = size;
+        break;
+      }
+
       /* Before we call file_read from the library, let's check that the fd provided by the user is good. */
       file_mapping_list* fm_list_ptr = thread_current()->pcb->fm_list;
       struct list_elem* iter;
@@ -244,7 +264,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       //   process_exit();
 		  // }
 
-      if (fd == 1) {
+      if (fd == STDOUT_FILENO) {
         /* Write buffer to stdout */
         putbuf((void *) buffer, size);
         f->eax = size;
@@ -363,11 +383,18 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_HALT: {
       shutdown_power_off();
     } break;
+
+    //floating point - practice call
+    case SYS_COMPUTE_E:{
+      int n = (int)args[1];
+      f->eax = sys_sum_to_e(n);
+      break;
+    }
   }
 }
 
 struct file* find_file(struct process* p, int fd){
-  if(!p || fd<3){//0,1,2 - stdin ...
+  if(!p){
     return NULL;
   }
   file_mapping_list* fm_list_ptr = p->fm_list;
@@ -389,7 +416,8 @@ int add_file(struct file* new_file) {
     return -1;
   }
   struct process* p = thread_current()->pcb;
-  struct file_mapping* f = malloc(sizeof(struct file_mapping));
+  struct file_mapping* f = calloc(1,sizeof(struct file_mapping));
+  CALLOC_ASSERT(f!=NULL);
   f->file_struct_ptr = new_file;
   f->fd = p->fd_counter;
   p->fd_counter += 1;
