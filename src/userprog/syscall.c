@@ -387,6 +387,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     //floating point - practice call
     case SYS_COMPUTE_E:{
       int n = (int)args[1];
+      if(n<0)
+        graceful_exception_exit(-1);
       f->eax = sys_sum_to_e(n);
       break;
     }

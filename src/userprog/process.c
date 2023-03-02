@@ -242,6 +242,9 @@ int process_wait(pid_t child_pid UNUSED) {
 
 /* Free the current process's resources. */
 void process_exit(void) {
+
+  --process_num;
+
   struct thread* cur = thread_current();
   uint32_t* pd;
 
