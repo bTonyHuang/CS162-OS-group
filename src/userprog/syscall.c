@@ -225,6 +225,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       lock_acquire(&file_operations_lock);
       struct file* target_file = find_file(thread_current()->pcb, fd);
       if(!target_file){
+        f->eax = -1;
+        lock_release(&file_operations_lock);
         break;
       }
       f->eax = file_read(target_file, buffer, size);
@@ -259,63 +261,63 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         }
       } 
     } break;
-    // case SYS_SEEK: {
-    //   //void seek (int fd, unsigned position)
-    //   int fd = args[1];
-    //   off_t position = (off_t)args[2];
-    //   if(fd < 0 || position < 0){
-    //     break;
-    //   }
-    //   lock_acquire(file_status->status_lock);
-    //   if (fd == 0) {
-    //     //stdin
-    //     file_seek(stdin,position);
-    //   } else if (fd == 1) {
-    //     // stdout
-    //     file_seek(stdout,position);
-    //   } else if (fd == 2) {
-    //     file_seek(stderr,position);
-    //   } else {
-    //     struct file* target_file=find_file(thread_current()->pcb,fd);
-    //     if(target_file) {
-    //       file_seek(target_file,position);
-    //     }
-    //   }
-    //   lock_release(file_status->status_lock);
-    // } break;
-    // case SYS_TELL: {
-    //   //unsigned tell(int fd)
-    //   int fd = args[1];
-    //   //Returns -1 if fd does not correspond to an entry in the file descriptor table.
-    //   if(fd < 0){
-    //     f->eax=-1;
-    //     break;
-    //   }
-    //   lock_acquire(file_status->status_lock);
-    //   switch(fd){
-    //     case 0://stdin
-    //       f->eax=file_tell(stdin);
-    //       break;
+    case SYS_SEEK: {
+      //void seek (int fd, unsigned position)
+      int fd = args[1];
+      off_t position = (off_t)args[2];
+      if(fd < 3 || position < 0){
+        f->eax = -1;
+        break;
+      }
 
-    //     case 1://stdout
-    //       f->eax=file_tell(stdout);
-    //       break;
+      lock_acquire(&file_operations_lock);
+      // if (fd == 0) {
+      //   //stdin
+      //   file_seek(stdin,position);
+      // } else if (fd == 1) {
+      //   // stdout
+      //   file_seek(stdout,position);
+      // } else if (fd == 2) {
+      //   file_seek(stderr,position);
+      // } else {
+      struct file* target_file=find_file(thread_current()->pcb,fd);
+      if(!target_file) {
+        f->eax = -1;
+        lock_release(&file_operations_lock);
+        break;
+      }
+      file_seek(target_file,position);
 
-    //     case 2://stderr
-    //        f->eax=file_tell(stderr);
-    //       break;          
-
-    //     default:
-    //       struct file* target_file=find_file(thread_current()->pcb,fd);
-    //       if(!target_file){
-    //         f->eax=-1;
-    //         break;
-    //       }
-    //       f->eax=file_tell(target_file);
-    //       break;
-    //     }
-    //   lock_release(file_status->status_lock);
-    // } break;
+      lock_release(&file_operations_lock);
+    } break;
+    case SYS_TELL: {
+      //unsigned tell(int fd)
+      int fd = args[1];
+      //Returns -1 if fd does not correspond to an entry in the file descriptor table.
+      if(fd < 3){
+        f->eax=-1;
+        break;
+      }
+      lock_acquire(&file_operations_lock);
+      // if (fd == 0) {
+      //   //stdin
+      //   f->eax=file_tell(stdin);
+      // } else if (fd == 1) {
+      //   //stdout
+      //   f->eax=file_tell(stdout);
+      // } else if (fd == 2) {
+      //   f->eax=file_tell(stderr);
+      // } else {
+      struct file* target_file=find_file(thread_current()->pcb,fd);
+      if(!target_file){
+        f->eax=-1;
+        lock_release(&file_operations_lock);
+        break;
+      }
+      f->eax=file_tell(target_file);
+      break;
+      lock_release(&file_operations_lock);
+    } break;
     case SYS_CLOSE: {
       //void close (int fd)
       int fd = args[1];
@@ -347,6 +349,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       lock_acquire(&file_operations_lock);
       struct file* target_file = find_file(thread_current()->pcb, fd);
       if(!target_file){
+        lock_release(&file_operations_lock);
+        f->eax = -1;
         break;
       }
       file_close(target_file);
