@@ -34,8 +34,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   int fd;
   validate_pointer(&f->eax, args, sizeof(uint32_t));
 
-  struct status_node* file_status = thread_current()->pcb->my_status; //thread that will aqcuire lock for files
-
   // printf("System call number: %d\n", args[0]); // for debugging purposes */
 
   switch(args[0]) {
@@ -196,14 +194,40 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     } break;
     case SYS_READ: {
       //int read (int fd, void *buffer, unsigned size)
-      //validation check
-      off_t size = (off_t)args[3];
-      if(!args[2]||size<0){
+      int fd = args[1];
+      void* buffer = (void *) args[2];
+      off_t size = (off_t) args[3];
+      validate_pointer(&f->eax, buffer, size);
+      if(size < 0){
         f->eax = -1;
         break;
       }
+
+      /* Before we call file_read from the library, let's check that the fd provided by the user is good. */
+      file_mapping_list* fm_list_ptr = thread_current()->pcb->fm_list;
+      struct list_elem* iter;
+      struct file_mapping* temp;
+      bool fm_exists = false;
+
+      for (iter = list_begin(fm_list_ptr); iter != list_end(fm_list_ptr); iter = list_next(iter)) {
+        temp = list_entry(iter, struct file_mapping, elem);
+        if (temp->fd == fd) {
+          fm_exists = true;
+          break;
+        }
+      }
+
+      if (!fm_exists) {
+        f->eax = -1;
+        break;
+      }
+
       lock_acquire(&file_operations_lock);
-      
+      struct file* target_file = find_file(thread_current()->pcb, fd);
+      if(!target_file){
+        break;
+      }
+      f->eax = file_read(target_file, buffer, size);
       lock_release(&file_operations_lock);
     } break;
     case SYS_WRITE: {
@@ -295,16 +319,39 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_CLOSE: {
       //void close (int fd)
       int fd = args[1];
-      if(fd < 0){
+      if(fd < 3){
+        f->eax = -1;
         break;
       }
-      lock_acquire(file_status->status_lock);
-      struct file* target_file=find_file(thread_current()->pcb,fd);
+
+      /* To account for user calling close twice on the same fd, we need to remove the file_mapping node */
+      file_mapping_list* fm_list_ptr = thread_current()->pcb->fm_list;
+      struct list_elem* iter;
+      struct file_mapping* temp;
+      bool fm_exists = false;
+
+      for (iter = list_begin(fm_list_ptr); iter != list_end(fm_list_ptr); iter = list_next(iter)) {
+        temp = list_entry(iter, struct file_mapping, elem);
+        if (temp->fd == fd) {
+          fm_exists = true;
+          list_remove(&temp->elem);
+          break;
+        }
+      }
+
+      if (!fm_exists) {
+        f->eax = -1;
+        break;
+      }
+
+      lock_acquire(&file_operations_lock);
+      struct file* target_file = find_file(thread_current()->pcb, fd);
       if(!target_file){
         break;
       }
       file_close(target_file);
-      lock_release(file_status->status_lock);
+      lock_release(&file_operations_lock);
+
     } break;
     case SYS_PRACTICE: {
       f->eax = args[1] + 1;
@@ -316,7 +363,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 }
 
 struct file* find_file(struct process* p, int fd){
-  if(!p||fd<3){//0,1,2 - stdin ...
+  if(!p || fd<3){//0,1,2 - stdin ...
     return NULL;
   }
   file_mapping_list* fm_list_ptr = p->fm_list;
