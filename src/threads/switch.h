@@ -6,11 +6,11 @@
 #ifndef __ASSEMBLER__
 /* switch_thread()'s stack frame. */
 struct switch_threads_frame {
-  uint32_t edi;        /*  0: Saved %edi. */
-  uint32_t esi;        /*  4: Saved %esi. */
-  uint32_t ebp;        /*  8: Saved %ebp. */
-  uint32_t ebx;        /* 12: Saved %ebx. */
-  uint8_t FPU_REGS[FPU_REGS_SIZE]; /* 16: save FPU registers*/
+  uint8_t FPU_REGS[FPU_REGS_SIZE]; /* 0: save FPU registers*/
+  uint32_t edi;        /*  108: Saved %edi. */
+  uint32_t esi;        /*  112: Saved %esi. */
+  uint32_t ebp;        /*  116: Saved %ebp. */
+  uint32_t ebx;        /* 120: Saved %ebx. */
   void (*eip)(void);   /* 124: Return address. */
   struct thread* cur;  /* 128: switch_threads()'s CUR argument. */
   struct thread* next; /* 132: switch_threads()'s NEXT argument. */

@@ -211,15 +211,15 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   and restore the registers from the aforementioned temporary location.*/
   
   //create an local variable and save it
-  char temp[108]; 
+  uint8_t temp[108]; 
   asm volatile("fsave (%0)"::"g"(&temp));
 
   //create clean state of FPU registers
   asm volatile("finit");
 
   //save them to switch_threads_frame, just like in start_process()
-  asm volatile("fsave (%0)"::"g"(&sf->FPU_REGS));
-  
+  asm volatile("fsave (%0)" ::"g"(&sf->FPU_REGS) : "memory");
+
   //restroe the registers from the local variable
   asm volatile("frstor (%0)"::"g"(&temp));
 

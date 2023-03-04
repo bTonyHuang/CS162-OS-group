@@ -184,7 +184,7 @@ static void start_process(void* data) {
   }
 
   //save the registers state via FPU_REG struct
-  asm volatile("fsave (%0)" ::"g"(&if_.FPU_REGS));
+  asm volatile("fsave (%0)" ::"g"(&if_.FPU_REGS) : "memory");
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
