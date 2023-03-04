@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "threads/switch.h"
 
 /* Interrupts on or off? */
 enum intr_level {
@@ -31,6 +32,9 @@ struct intr_frame {
   uint16_t fs, : 16;  /* Saved FS segment register. */
   uint16_t es, : 16;  /* Saved ES segment register. */
   uint16_t ds, : 16;  /* Saved DS segment register. */
+
+  /*pushed in intr-stubs.S to save FPU registers*/
+  uint8_t FPU_REGS[FPU_REGS_SIZE];
 
   /* Pushed by intrNN_stub in intr-stubs.S. */
   uint32_t vec_no; /* Interrupt vector number. */

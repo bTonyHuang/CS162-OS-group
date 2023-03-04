@@ -206,6 +206,23 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  /*saving the current FPU registers into a temporary location (e.g. local variable), 
+  initializing a clean state of FPU registers, save these FPU registers into the desired destination, 
+  and restore the registers from the aforementioned temporary location.*/
+  
+  //create an local variable and save it
+  char temp[108]; 
+  asm volatile("fsave (%0)"::"g"(&temp));
+
+  //create clean state of FPU registers
+  asm volatile("finit");
+
+  //save them to switch_threads_frame, just like in start_process()
+  asm volatile("fsave (%0)"::"g"(&sf->FPU_REGS));
+  
+  //restroe the registers from the local variable
+  asm volatile("frstor (%0)"::"g"(&temp));
+
   /* Add to run queue. */
   thread_unblock(t);
 

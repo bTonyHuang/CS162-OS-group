@@ -58,8 +58,8 @@ void userprog_init(void) {
 pid_t process_execute(const char* file_name, struct status_node* child) {
 
   if (process_num == PROCESS_NUM_LIMIT)
-        return TID_ERROR;
-    ++process_num;
+    return TID_ERROR;
+  ++process_num;
 
   char* fn_copy;
   tid_t tid;
@@ -68,17 +68,17 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   // fn_copy = palloc_get_page(0);
-  fn_copy = calloc(1,PGSIZE);
+  fn_copy = calloc(1, PGSIZE);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
 
   /* store status_node shared between parent + child and file_name in one struct
      to be used in thread_create's thread func (start_process()) */
-  struct start_process_data* sp_data = calloc(1,sizeof(struct start_process_data));
+  struct start_process_data* sp_data = calloc(1, sizeof(struct start_process_data));
   if (sp_data == NULL)
     return TID_ERROR;
-  sp_data->file_name = calloc(1,PGSIZE);
+  sp_data->file_name = calloc(1, PGSIZE);
   if (sp_data->file_name == NULL)
     return TID_ERROR;
   strlcpy(sp_data->file_name, fn_copy, PGSIZE);
@@ -88,7 +88,7 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
   tid = thread_create(file_name, PRI_DEFAULT, start_process, sp_data);
   child->pid = tid;
   // if (tid == TID_ERROR)
-    // palloc_free_page(fn_copy);
+  // palloc_free_page(fn_copy);
   free(fn_copy);
   return tid;
 }
@@ -96,7 +96,7 @@ pid_t process_execute(const char* file_name, struct status_node* child) {
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* data) {
-  struct start_process_data* sp_data = (struct start_process_data*) data;
+  struct start_process_data* sp_data = (struct start_process_data*)data;
   // char* file_name = (char*)file_name_;
   char* file_name = sp_data->file_name;
   struct status_node* sp_status = sp_data->set_status;
@@ -105,7 +105,7 @@ static void start_process(void* data) {
   bool success, pcb_success;
 
   /* Allocate process control block */
-  struct process* new_pcb = calloc(1,sizeof(struct process));
+  struct process* new_pcb = calloc(1, sizeof(struct process));
   success = pcb_success = new_pcb != NULL;
 
   /* Initialize process control block */
@@ -120,9 +120,9 @@ static void start_process(void* data) {
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
     t->pcb->fd_counter = 3;
 
-    file_mapping_list* fm_list = calloc(1,sizeof(struct list));
+    file_mapping_list* fm_list = calloc(1, sizeof(struct list));
     success = pcb_success = fm_list != NULL;
-    child_mapping_list* cm_list = calloc(1,sizeof(struct list));
+    child_mapping_list* cm_list = calloc(1, sizeof(struct list));
     success = pcb_success = cm_list != NULL;
 
     list_init(fm_list);
@@ -132,9 +132,9 @@ static void start_process(void* data) {
 
     /* Process was not birthed by a parent, but we want a non-NULL my_status anyways for less hassle. */
     if (sp_status == NULL) {
-      struct lock* new_lock = calloc(1,sizeof(struct lock));
+      struct lock* new_lock = calloc(1, sizeof(struct lock));
       success = pcb_success = new_lock != NULL;
-      sp_status = calloc(1,sizeof(struct status_node));
+      sp_status = calloc(1, sizeof(struct status_node));
       success = pcb_success = sp_status != NULL;
       sema_init(&(sp_status->load_sema), 0);
       sema_init(&(sp_status->exit_sema), 0);
@@ -146,8 +146,6 @@ static void start_process(void* data) {
     }
 
     t->pcb->my_status = sp_status;
-
-
   }
 
   /* Initialize interrupt frame and load executable. */
@@ -184,6 +182,9 @@ static void start_process(void* data) {
     t->pcb = NULL;
     free(pcb_to_free);
   }
+
+  //save the registers state via FPU_REG struct
+  asm volatile("fsave (%0)" ::"g"(&if_.FPU_REGS));
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -240,6 +241,23 @@ int process_wait(pid_t child_pid UNUSED) {
 //   sema_down(&temporary);
 // }
 
+//free process file descriptors mapping when exit process
+// static void free_file_mapping(struct thread *cur){
+//   file_mapping_list* fm_list_ptr = cur->pcb->fm_list;
+//   struct list_elem* iter;
+//   struct file_mapping* temp;
+
+//   for (iter = list_begin(fm_list_ptr); iter != list_end(fm_list_ptr); iter = list_next(iter)) {
+//     temp = list_entry(iter, struct file_mapping, elem);
+//     if(!temp)
+//       break;
+//     list_remove(&temp->elem);
+//     file_close(temp->file_struct_ptr);
+//     free(temp);
+//   }
+//   return;
+// }
+
 /* Free the current process's resources. */
 void process_exit(void) {
 
@@ -250,6 +268,8 @@ void process_exit(void) {
 
   file_allow_write(cur->file_executable);
   file_close(cur->file_executable);
+
+  //free_file_mapping(cur);
 
   /*******************
 
@@ -393,14 +413,14 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   strlcpy(file_executable, file_name, totalLength + 1);
   file_executable[totalLength] = '\0';
 
-  for (i = 0; i < totalLength; i++){
+  for (i = 0; i < totalLength; i++) {
     if (file_executable[i] == ' ') {
       file_executable[i] = '\0';
       break;
     }
   }
 
-  strlcpy(t->pcb->process_name, file_executable, i+1);
+  strlcpy(t->pcb->process_name, file_executable, i + 1);
 
   /* Allocate and activate page directory. */
   t->pcb->pagedir = pagedir_create();
@@ -601,7 +621,7 @@ static bool setup_stack(void** esp, const char* file_name) {
       *esp = PHYS_BASE;
 
       /* Argument Passing */
-      char* stack_ptr = (char *) *esp; // starts at PHYS_BASE
+      char* stack_ptr = (char*)*esp; // starts at PHYS_BASE
       int argc = 0;
       int len_literals = 0;
       char file_name_copy[strlen(file_name) + 1];
@@ -623,13 +643,12 @@ static bool setup_stack(void** esp, const char* file_name) {
         token = strtok_r(NULL, " ", &context);
       }
 
-
       /* Iterate again, this time pushing the addresses of argument literals into the argv array */
       char* argv[argc + 1];
       argv[argc] = NULL;
       argc = 0;
 
-      stack_ptr = (char *) *esp;
+      stack_ptr = (char*)*esp;
       context = NULL;
       strlcpy(file_name_copy, file_name, strlen(file_name) + 1);
       token = strtok_r(file_name_copy, " ", &context);
@@ -646,7 +665,7 @@ static bool setup_stack(void** esp, const char* file_name) {
 
       /* Stack align, decrement stack_ptr */
       int offset = len_literals + 8; // argv argc
-      offset += 4 * (argc + 1); // argv addresses
+      offset += 4 * (argc + 1);      // argv addresses
       int padding = 16 - (offset % 16);
       stack_ptr = stack_ptr - padding;
 
@@ -664,9 +683,8 @@ static bool setup_stack(void** esp, const char* file_name) {
       stack_ptr -= 4;
       *stack_ptr = 0;
 
-
       /* Set the actual factual esp to our modified esp */
-      *esp = (void *) stack_ptr;
+      *esp = (void*)stack_ptr;
 
       /* Debugging */
       // hex_dump(0, *esp, 100, true);
