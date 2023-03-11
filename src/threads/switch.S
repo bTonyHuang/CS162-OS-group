@@ -27,10 +27,8 @@ switch_threads:
 	pushl %ebp
 	pushl %esi
 	pushl %edi
-
-	#save FPU registers (similar in intr_stubs.S, follow the order in switch_threads_frame)
-	subl $FPU_REGS_SIZE, %esp
-    fsave (%esp)
+	subl $108, %esp
+	fsave (%esp)
 
 	# Get offsetof (struct thread, stack).
 .globl thread_stack_ofs
@@ -44,24 +42,19 @@ switch_threads:
 	movl SWITCH_NEXT(%esp), %ecx
 	movl (%ecx,%edx,1), %esp
 
-	#restore caller's FPU registers
-	frstor (%esp)
-	addl $FPU_REGS_SIZE, %esp
-
 	# Restore caller's register state.
+	frstor (%esp)
+	addl $108, %esp
 	popl %edi
 	popl %esi
 	popl %ebp
 	popl %ebx
-	
         ret
 .endfunc
 
 .globl switch_entry
 .func switch_entry
 switch_entry:
-	finit
-
 	# Discard switch_threads() arguments.
 	addl $8, %esp
 

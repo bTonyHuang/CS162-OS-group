@@ -1,5 +1,6 @@
 #include "threads/thread.h"
 #include <debug.h>
+#include <float.h>
 #include <stddef.h>
 #include <random.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -178,6 +180,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   struct kernel_thread_frame* kf;
   struct switch_entry_frame* ef;
   struct switch_threads_frame* sf;
+  uint32_t fpu_curr[27];
   tid_t tid;
 
   ASSERT(function != NULL);
@@ -203,25 +206,9 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Stack frame for switch_threads(). */
   sf = alloc_frame(t, sizeof *sf);
+  fpu_save_init(&sf->fpu, &fpu_curr);
   sf->eip = switch_entry;
   sf->ebp = 0;
-
-  /*saving the current FPU registers into a temporary location (e.g. local variable), 
-  initializing a clean state of FPU registers, save these FPU registers into the desired destination, 
-  and restore the registers from the aforementioned temporary location.*/
-  
-  //create an local variable and save it
-  uint8_t temp[108]; 
-  asm volatile("fsave (%0)"::"g"(&temp));
-
-  //create clean state of FPU registers
-  asm volatile("finit");
-
-  //save them to switch_threads_frame, just like in start_process()
-  asm volatile("fsave (%0)" ::"g"(&sf->FPU_REGS) : "memory");
-
-  //restroe the registers from the local variable
-  asm volatile("frstor (%0)"::"g"(&temp));
 
   /* Add to run queue. */
   thread_unblock(t);
