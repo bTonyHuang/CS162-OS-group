@@ -90,12 +90,14 @@ void timer_sleep(int64_t sleep_ticks) {
 
   struct thread* cur = thread_current();
 
+  enum intr_level old_level = intr_disable();
   cur->wake_up_time = timer_ticks() + sleep_ticks;
   //generally assume that previous threads would be woke up earlier
   list_push_back(&sleeping_threads_list, &cur->timer_elem);
-
+  //must be called with intr_off
   thread_block();
-  //call yield() when thread is woken up and schedule the higher priority thread 
+  intr_set_level(old_level);
+  
   thread_yield();
 }
 
@@ -146,23 +148,25 @@ static void timer_interrupt(struct intr_frame* args UNUSED) {
   ticks++;
   thread_tick();
 
+  struct thread* cur = thread_current();
   //iterate check sleeping list
   struct list_elem* e;
-
   for (e = list_begin(&sleeping_threads_list); e != list_end(&sleeping_threads_list);
        e = list_next(e)) {
     struct thread* t = list_entry(e, struct thread, timer_elem);
-    //here I set >= to deal with the case if timer_interrupt before timer_sleep(1) blocks the thread.
-    //so then thread t is not blocked but it is in the list, and we will woke it up at next tick
-    if (ticks >= t->wake_up_time) {
+    if (ticks == t->wake_up_time) { 
+      list_remove(e);
       //check if t is blocked
       if(t->status == THREAD_BLOCKED){
-        list_remove(e);
         thread_unblock(t);
-        thread_yield();//yield() in here or in timer_sleep()?
+        //if woken thread priority is higher, call yield()
+        if(t->priority > cur->priority)
+          intr_yield_on_return();
       }
     }
   }
+
+  return;
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
