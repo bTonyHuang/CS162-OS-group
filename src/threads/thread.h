@@ -91,10 +91,10 @@ struct thread {
   struct list_elem allelem;  /* List element for all threads list. */
   struct file* file_executable;
 
+  //owned by timer.c
   int64_t wake_up_time; //the time the thread suppose to wake up
-  struct list_elem timer_elem;
 
-  /* Shared between thread.c and synch.c. */
+  /* Shared between thread.c, timer.c and synch.c. */
   struct list_elem elem; /* List element. */
 
 #ifdef USERPROG
