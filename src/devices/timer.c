@@ -30,6 +30,9 @@ static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
 static void real_time_delay(int64_t num, int32_t denom);
 
+/*create a sleeping_thread_list*/
+struct list sleeping_threads_list;
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void timer_init(void) {
@@ -75,12 +78,22 @@ int64_t timer_elapsed(int64_t then) { return timer_ticks() - then; }
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
-void timer_sleep(int64_t ticks) {
-  int64_t start = timer_ticks();
+void timer_sleep(int64_t sleep_ticks) {
+  //int64_t start = timer_ticks();
 
   ASSERT(intr_get_level() == INTR_ON);
-  while (timer_elapsed(start) < ticks)
-    thread_yield();
+  //   while (timer_elapsed(start) < ticks)
+  //     thread_yield();
+
+  struct thread* cur = thread_current();
+
+  cur->wake_up_time = timer_ticks() + sleep_ticks;
+
+  list_push_back(&sleeping_threads_list, &cur->timer_elem);
+
+  thread_block();
+
+  thread_yield();
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -129,6 +142,17 @@ void timer_print_stats(void) { printf("Timer: %" PRId64 " ticks\n", timer_ticks(
 static void timer_interrupt(struct intr_frame* args UNUSED) {
   ticks++;
   thread_tick();
+
+  //check sleeping list
+  struct list_elem* e;
+
+  for (e = list_begin(&sleeping_threads_list); e != list_end(&sleeping_threads_list); e = list_next(e)) {
+    struct thread* t = list_entry(e, struct thread, timer_elem);
+    if(ticks==t->wake_up_time){
+      list_remove(e);
+      thread_unblock(t);
+    }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

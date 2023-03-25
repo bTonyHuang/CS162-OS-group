@@ -89,6 +89,9 @@ struct thread {
   int priority;              /* Priority. */
   struct list_elem allelem;  /* List element for all threads list. */
 
+  int64_t wake_up_time; //the time the thread suppose to wake up
+  struct list_elem timer_elem;
+
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
 
