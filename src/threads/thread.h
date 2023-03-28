@@ -87,15 +87,24 @@ struct thread {
   enum thread_status status; /* Thread state. */
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
-  int priority;              /* Priority. */
   struct list_elem allelem;  /* List element for all threads list. */
   struct file* file_executable;
 
-  //owned by timer.c
-  int64_t wake_up_time; //the time the thread suppose to wake up
+  /* Owned by timer.c for waking threads up during appropriate ticks. */
+  int64_t wake_up_time;
 
   /* Shared between thread.c, timer.c and synch.c. */
   struct list_elem elem; /* List element. */
+
+  /* All locks that this thread is currently holding. */
+  struct list* acquired_locks;
+
+  /* If this thread is waiting on a lock, keep track of the lock. */
+  struct lock* waiting_lock;
+
+  /* Owned by thread.c for strict thread priority scheduling. */
+  int effective_priority;
+  int base_priority;
 
 #ifdef USERPROG
   /* Owned by process.c. */

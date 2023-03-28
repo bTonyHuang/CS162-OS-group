@@ -173,7 +173,7 @@ static void timer_interrupt(struct intr_frame* args UNUSED) {
     if (t->status == THREAD_BLOCKED) {
       thread_unblock(t);
       //if woken thread priority is higher, call yield()
-      if (t->priority > cur->priority)
+      if (t->effective_priority > cur->effective_priority)
         intr_yield_on_return();
     }
   }

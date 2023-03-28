@@ -125,7 +125,9 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       /* process_execute(executable, shared status_node to child process) creates a new child process 
          parent sema downs to wait for child process to finish loading and exiting 
          before executing rest of code and returning w/ child's pid */
+      lock_acquire(&file_operations_lock);
       pid_t cpid = process_execute((const char*)args[1], new_status);
+      lock_release(&file_operations_lock);
       sema_down(&(new_status->load_sema));
 
       if (new_status->loaded) {
