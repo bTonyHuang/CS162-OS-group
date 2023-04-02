@@ -97,7 +97,7 @@ struct thread {
   struct list_elem elem; /* List element. */
 
   /* All locks that this thread is currently holding. */
-  struct list* acquired_locks;
+  struct list acquired_locks;
 
   /* If this thread is waiting on a lock, keep track of the lock. */
   struct lock* waiting_lock;

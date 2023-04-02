@@ -93,11 +93,13 @@ scheduler_func* scheduler_jump_table[8] = {thread_schedule_fifo,     thread_sche
                                            thread_schedule_reserved, thread_schedule_reserved,
                                            thread_schedule_reserved, thread_schedule_reserved};
 
+//LESS function(sort in ascending order), if aux!=NULL, invert the return(sort in descending order)
 static bool compare_priority(const struct list_elem* elem1, const struct list_elem* elem2,
-                                 void* aux UNUSED) {
+                                 void* aux) {
   struct thread* t1 = list_entry(elem1, struct thread, elem);
   struct thread* t2 = list_entry(elem2, struct thread, elem);
-  return (t1->effective_priority < t2->effective_priority);
+  bool less = (t1->effective_priority < t2->effective_priority);
+  return aux == NULL ? less : !less;
 }
 
 /* Initializes the threading system by transforming the code
@@ -269,7 +271,8 @@ static void thread_enqueue(struct thread* t) {
   if (active_sched_policy == SCHED_FIFO) 
     list_push_back(&fifo_ready_list, &t->elem);
   else if (active_sched_policy == SCHED_PRIO)
-    list_push_back(&prio_ready_list, &t->elem);
+    //list_push_back(&prio_ready_list, &t->elem);
+    list_insert_ordered(&prio_ready_list, &t->elem, compare_priority, (void*)1);//set aux not NULL to sort in desending order
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
@@ -377,7 +380,7 @@ void thread_set_priority(int new_priority) {
   struct list_elem* iter;
   struct lock* curr_lock;
 
-  for (iter = list_begin(t->acquired_locks); iter != list_end(t->acquired_locks); iter = list_next(iter)) {
+  for (iter = list_begin(&t->acquired_locks); iter != list_end(&t->acquired_locks); iter = list_next(iter)) {
     curr_lock = list_entry(iter, struct lock, elem);
     
     /* Check the max_priority of that lock, update our max_priority var if necessary. */
@@ -389,12 +392,15 @@ void thread_set_priority(int new_priority) {
   t->effective_priority = max_priority;
 
   /* Yield if current thread is no longer the highest priority thread. */
-  struct thread* highest_prio_thread = list_entry(list_max(&prio_ready_list, compare_priority, NULL), struct thread, elem);
-  if (t->effective_priority < highest_prio_thread->effective_priority) {
-    intr_yield_on_return();
-  }
+  list_sort(&prio_ready_list, compare_priority, (void*)1);//aux not NULL -> sort in descending order
+  struct thread* highest_prio_thread =
+      list_entry(list_front(&prio_ready_list), struct thread, elem);
 
   intr_set_level(old_level);
+
+  if (t->effective_priority < highest_prio_thread->effective_priority) {
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -490,7 +496,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT(name != NULL);
 
-  memset(t, 0, sizeof *t);
+  memset(t, 0, sizeof(struct thread));
   t->status = THREAD_BLOCKED;
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
@@ -498,6 +504,8 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->effective_priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
+
+  list_init(&t->acquired_locks);
 
   old_level = intr_disable();
   list_push_back(&all_list, &t->allelem);
@@ -526,7 +534,7 @@ static struct thread* thread_schedule_fifo(void) {
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
   if (!list_empty(&prio_ready_list))
-    return list_entry(list_max(&prio_ready_list, compare_priority, NULL), struct thread, elem);
+    return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
   else
     return idle_thread;
 }
