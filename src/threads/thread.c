@@ -203,6 +203,10 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Initialize thread. */
   init_thread(t, name, priority);
+  /* Preempt current thread in thread_create if the new thread's priority is higher. */
+  if (priority > thread_current()->effective_priority) {
+    intr_yield_on_return();
+  }
   tid = t->tid = allocate_tid();
 
   /* Stack frame for kernel_thread(). */
@@ -249,9 +253,10 @@ static void thread_enqueue(struct thread* t) {
   ASSERT(intr_get_level() == INTR_OFF);
   ASSERT(is_thread(t));
 
-  if (active_sched_policy == SCHED_FIFO)
+  if (active_sched_policy == SCHED_FIFO) 
     list_push_back(&fifo_ready_list, &t->elem);
   else if (active_sched_policy == SCHED_PRIO)
+
     list_push_back(&prio_ready_list, &t->elem);
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
@@ -350,7 +355,9 @@ void thread_set_priority(int new_priority) {
 
   struct thread* t = thread_current();
 
+
   enum intr_level old_level = intr_disable();
+
 
   t->base_priority = new_priority;
 
@@ -359,6 +366,7 @@ void thread_set_priority(int new_priority) {
 
   struct list_elem* iter;
   struct lock* curr_lock;
+
 
   for (iter = list_begin(&t->acquired_locks); iter != list_end(&t->acquired_locks);
        iter = list_next(iter)) {
@@ -373,6 +381,7 @@ void thread_set_priority(int new_priority) {
   t->effective_priority = max_priority;
 
   /* Yield if current thread is no longer the highest priority thread. */
+
   struct thread* highest_prio_thread =
       list_entry(list_max(&prio_ready_list, compare_thread_priority, NULL), struct thread, elem);
 
@@ -476,13 +485,16 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   ASSERT(PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT(name != NULL);
 
-  memset(t, 0, sizeof *t);
+  memset(t, 0, sizeof(struct thread));
   t->status = THREAD_BLOCKED;
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
-  t->priority = priority;
+  t->base_priority = priority;
+  t->effective_priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
+  list_init(&t->acquired_locks);
+
   list_init(&t->acquired_locks);
 
   old_level = intr_disable();
@@ -511,12 +523,14 @@ static struct thread* thread_schedule_fifo(void) {
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
+
   if (!list_empty(&prio_ready_list)){
     struct list_elem* e = list_max(&prio_ready_list, compare_thread_priority, NULL);
     struct thread* t = list_entry(e, struct thread, elem);
     list_remove(e);
     return t;
   } else
+
     return idle_thread;
 }
 
