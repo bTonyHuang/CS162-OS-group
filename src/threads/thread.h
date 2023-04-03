@@ -92,9 +92,6 @@ struct thread {
   int64_t wake_up_time;
   struct list_elem timer_elem;
 
-  /* Owned by timer.c for waking threads up during appropriate ticks. */
-  int64_t wake_up_time;
-
   /* Shared between thread.c, timer.c and synch.c. */
   struct list_elem elem; /* List element. */
 
