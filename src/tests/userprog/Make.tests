@@ -19,13 +19,11 @@ wait-simple wait-twice wait-killed wait-bad-pid multi-recurse           \
 multi-child-fd rox-simple rox-child rox-multichild bad-read bad-write   \
 bad-read2 bad-write2 bad-jump bad-jump2 iloveos practice stack-align-1  \
 stack-align-2 stack-align-3 stack-align-4 floating-point fp-simul       \
-fp-asm fp-syscall fp-kernel-e fp-init filesize-err filesize)
+fp-asm fp-syscall fp-kernel-e fp-init)
 
 tests/userprog_PROGS = $(tests/userprog_TESTS) $(addprefix \
 tests/userprog/,child-simple child-args child-bad child-close \
 child-rox compute-e fp-asm-helper)
-tests/userprog/filesize-err_SRC = tests/userprog/filesize-err.c tests/main.c
-tests/userprog/filesize_SRC = tests/userprog/filesize.c tests/main.c
 
 tests/userprog/iloveos_SRC = tests/userprog/iloveos.c tests/main.c
 tests/userprog/practice_SRC = tests/userprog/practice.c tests/main.c
@@ -172,6 +170,3 @@ tests/userprog/rox-multichild_PUTFILES += tests/userprog/child-rox
 
 tests/userprog/fp-simul_PUTFILES += tests/userprog/compute-e
 tests/userprog/fp-asm_PUTFILES += tests/userprog/fp-asm-helper
-
-
-tests/userprog/filesize_PUTFILES += tests/userprog/filesize.txt

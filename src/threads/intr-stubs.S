@@ -1,5 +1,4 @@
 #include "threads/loader.h"
-#include "threads/switch.h"
 
         .text
 
@@ -18,24 +17,21 @@
 */
 .func intr_entry
 intr_entry:
-   /*accoding to the order in intr_frame*/
-   /*save FPU registers*/
-   subl $FPU_REGS_SIZE, %esp
-   fsave (%esp)
-
 	/* Save caller's registers. */
 	pushl %ds
 	pushl %es
 	pushl %fs
 	pushl %gs
 	pushal
+	subl $108, %esp
+	fsave (%esp)
 
 	/* Set up kernel environment. */
 	cld			/* String instructions go upward. */
 	mov $SEL_KDSEG, %eax	/* Initialize segment registers. */
 	mov %eax, %ds
 	mov %eax, %es
-	leal 56(%esp), %ebp	/* Set up frame pointer. */
+	leal 164(%esp), %ebp	/* Set up frame pointer. */
 
 	/* Call interrupt handler. */
 	pushl %esp
@@ -56,15 +52,13 @@ intr_entry:
 .func intr_exit
 intr_exit:
 	/* Restore caller's registers. */
+	frstor (%esp)
+	addl $108, %esp
 	popal
 	popl %gs
 	popl %fs
 	popl %es
 	popl %ds
-
-   /*restore FPU registers*/
-   frstor (%esp)
-   addl $FPU_REGS_SIZE, %esp
 
         /* Discard `struct intr_frame' vec_no, error_code,
            frame_pointer members. */

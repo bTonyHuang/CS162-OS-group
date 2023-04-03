@@ -166,7 +166,8 @@ static void timer_interrupt(struct intr_frame* args UNUSED) {
       break;
     }
 
-    struct list_elem* temp = e;
+
+    struct list_elem *temp = e;
     e = list_next(e);
     list_remove(temp);
     //check if t is blocked

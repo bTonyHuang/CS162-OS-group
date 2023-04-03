@@ -4,7 +4,6 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-#include "threads/synch.h"
 #include "threads/fixed-point.h"
 
 /* States in a thread's life cycle. */
@@ -88,7 +87,10 @@ struct thread {
   char name[16];             /* Name (for debugging purposes). */
   uint8_t* stack;            /* Saved stack pointer. */
   struct list_elem allelem;  /* List element for all threads list. */
-  struct file* file_executable;
+
+  /* Owned by timer.c for waking threads up during appropriate ticks. */
+  int64_t wake_up_time;
+  struct list_elem timer_elem;
 
   /* Owned by timer.c for waking threads up during appropriate ticks. */
   int64_t wake_up_time;
@@ -161,5 +163,9 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+
+//for pintos-list less compare fun
+bool compare_thread_priority(const struct list_elem* elem1, const struct list_elem* elem2,
+                             void* aux UNUSED);
 
 #endif /* threads/thread.h */

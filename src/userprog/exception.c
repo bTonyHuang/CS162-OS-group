@@ -5,14 +5,12 @@
 #include "userprog/process.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-#include "userprog/syscall.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill(struct intr_frame*);
 static void page_fault(struct intr_frame*);
-void graceful_exception_exit(int status);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -137,14 +135,18 @@ static void page_fault(struct intr_frame* f) {
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  /* Handle bad dereferences from system call implementations. */
+  if (!user) {
+    f->eip = (void (*)(void))f->eax;
+    f->eax = 0;
+    return;
+  }
+
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
   printf("Page fault at %p: %s error %s page in %s context.\n", fault_addr,
          not_present ? "not present" : "rights violation", write ? "writing" : "reading",
          user ? "user" : "kernel");
-  
-  f->eip = (void *) f->eax;
-  f->eax = 0xffffffff; 
-  graceful_exception_exit(-1);
+  kill(f);
 }

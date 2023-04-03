@@ -1,5 +1,6 @@
 #include "threads/thread.h"
 #include <debug.h>
+#include <float.h>
 #include <stddef.h>
 #include <random.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -93,13 +95,11 @@ scheduler_func* scheduler_jump_table[8] = {thread_schedule_fifo,     thread_sche
                                            thread_schedule_reserved, thread_schedule_reserved,
                                            thread_schedule_reserved, thread_schedule_reserved};
 
-//LESS function(sort in ascending order), if aux!=NULL, invert the return(sort in descending order)
-static bool compare_priority(const struct list_elem* elem1, const struct list_elem* elem2,
-                                 void* aux) {
+bool compare_thread_priority(const struct list_elem* elem1, const struct list_elem* elem2,
+                             void* aux UNUSED) {
   struct thread* t1 = list_entry(elem1, struct thread, elem);
   struct thread* t2 = list_entry(elem2, struct thread, elem);
-  bool less = (t1->effective_priority < t2->effective_priority);
-  return aux == NULL ? less : !less;
+  return (t1->effective_priority < t2->effective_priority);
 }
 
 /* Initializes the threading system by transforming the code
@@ -191,6 +191,7 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   struct kernel_thread_frame* kf;
   struct switch_entry_frame* ef;
   struct switch_threads_frame* sf;
+  uint32_t fpu_curr[27];
   tid_t tid;
 
   ASSERT(function != NULL);
@@ -220,25 +221,9 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Stack frame for switch_threads(). */
   sf = alloc_frame(t, sizeof *sf);
+  fpu_save_init(&sf->fpu, &fpu_curr);
   sf->eip = switch_entry;
   sf->ebp = 0;
-
-  /*saving the current FPU registers into a temporary location (e.g. local variable), 
-  initializing a clean state of FPU registers, save these FPU registers into the desired destination, 
-  and restore the registers from the aforementioned temporary location.*/
-  
-  //create an local variable and save it
-  uint8_t temp[108]; 
-  asm volatile("fsave (%0)"::"g"(&temp));
-
-  //create clean state of FPU registers
-  asm volatile("finit");
-
-  //save them to switch_threads_frame, just like in start_process()
-  asm volatile("fsave (%0)" ::"g"(&sf->FPU_REGS) : "memory");
-
-  //restroe the registers from the local variable
-  asm volatile("frstor (%0)"::"g"(&temp));
 
   /* Add to run queue. */
   thread_unblock(t);
@@ -271,8 +256,8 @@ static void thread_enqueue(struct thread* t) {
   if (active_sched_policy == SCHED_FIFO) 
     list_push_back(&fifo_ready_list, &t->elem);
   else if (active_sched_policy == SCHED_PRIO)
-    //list_push_back(&prio_ready_list, &t->elem);
-    list_insert_ordered(&prio_ready_list, &t->elem, compare_priority, (void*)1);//set aux not NULL to sort in desending order
+
+    list_push_back(&prio_ready_list, &t->elem);
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
 }
@@ -370,7 +355,9 @@ void thread_set_priority(int new_priority) {
 
   struct thread* t = thread_current();
 
-  enum intr_level old_level = intr_disable(); 
+
+  enum intr_level old_level = intr_disable();
+
 
   t->base_priority = new_priority;
 
@@ -380,9 +367,11 @@ void thread_set_priority(int new_priority) {
   struct list_elem* iter;
   struct lock* curr_lock;
 
-  for (iter = list_begin(&t->acquired_locks); iter != list_end(&t->acquired_locks); iter = list_next(iter)) {
+
+  for (iter = list_begin(&t->acquired_locks); iter != list_end(&t->acquired_locks);
+       iter = list_next(iter)) {
     curr_lock = list_entry(iter, struct lock, elem);
-    
+
     /* Check the max_priority of that lock, update our max_priority var if necessary. */
     if (curr_lock->max_priority > max_priority) {
       max_priority = curr_lock->max_priority;
@@ -392,9 +381,9 @@ void thread_set_priority(int new_priority) {
   t->effective_priority = max_priority;
 
   /* Yield if current thread is no longer the highest priority thread. */
-  list_sort(&prio_ready_list, compare_priority, (void*)1);//aux not NULL -> sort in descending order
+
   struct thread* highest_prio_thread =
-      list_entry(list_front(&prio_ready_list), struct thread, elem);
+      list_entry(list_max(&prio_ready_list, compare_thread_priority, NULL), struct thread, elem);
 
   intr_set_level(old_level);
 
@@ -504,6 +493,7 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->effective_priority = priority;
   t->pcb = NULL;
   t->magic = THREAD_MAGIC;
+  list_init(&t->acquired_locks);
 
   list_init(&t->acquired_locks);
 
@@ -533,9 +523,14 @@ static struct thread* thread_schedule_fifo(void) {
 
 /* Strict priority scheduler */
 static struct thread* thread_schedule_prio(void) {
-  if (!list_empty(&prio_ready_list))
-    return list_entry(list_pop_front(&prio_ready_list), struct thread, elem);
-  else
+
+  if (!list_empty(&prio_ready_list)){
+    struct list_elem* e = list_max(&prio_ready_list, compare_thread_priority, NULL);
+    struct thread* t = list_entry(e, struct thread, elem);
+    list_remove(e);
+    return t;
+  } else
+
     return idle_thread;
 }
 

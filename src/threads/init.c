@@ -61,6 +61,7 @@ static const char* swap_bdev_name;
 static size_t user_page_limit = SIZE_MAX;
 
 static void bss_init(void);
+static inline void fp_init(void);
 static void paging_init(void);
 
 static char** read_command_line(void);
@@ -79,6 +80,9 @@ int main(void) {
 
   /* Clear BSS. */
   bss_init();
+
+  /* Floating Point Initialization */
+  fp_init();
 
   /* Break command line into arguments and parse options. */
   argv = read_command_line();
@@ -150,6 +154,9 @@ static void bss_init(void) {
   extern char _start_bss, _end_bss;
   memset(&_start_bss, 0, &_end_bss - &_start_bss);
 }
+
+/* Initialize the x87 FPU by calling the fninit instruction */
+static inline void fp_init(void) { asm("fninit"); }
 
 /* Populates the base page directory and page table with the
    kernel virtual mapping, and then sets up the CPU to use the
@@ -312,26 +319,7 @@ static void run_task(char** argv) {
 
   printf("Executing '%s':\n", task);
 #ifdef USERPROG
-  child_mapping_list* cm_list = malloc(sizeof(struct list));
-  list_init(cm_list);
-  thread_current()->pcb->cm_list = cm_list;
-
-  struct lock* new_lock = malloc(sizeof(struct lock));
-  struct status_node* new_status = malloc(sizeof(struct status_node));
-
-  sema_init(&(new_status->load_sema), 0);
-  sema_init(&(new_status->exit_sema), 0);
-  lock_init(new_lock);
-  new_status->status_lock = new_lock;
-
-  new_status->loaded = false;
-  new_status->exit_status = -1;
-  new_status->ref_count = 2;
-
-  list_push_front(thread_current()->pcb->cm_list, &new_status->elem);
-  pid_t cpid = process_execute(task, new_status);
-
-  process_wait(cpid);
+  process_wait(process_execute(task));
 #endif
   printf("Execution of '%s' complete.\n", task);
 }
