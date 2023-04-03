@@ -162,6 +162,8 @@ void lock_init(struct lock* lock) {
 
   lock->holder = NULL;
   sema_init(&lock->semaphore, 1);
+
+  lock->max_priority = PRI_MIN;
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
@@ -177,6 +179,12 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
+  //the lock is holding by another thread, check the need of priodonation
+  if(lock->holder){
+
+  }
+
+  //put the thread in the waiter list
   sema_down(&lock->semaphore);
   lock->holder = thread_current();
 }
@@ -208,6 +216,11 @@ void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
+  //check if the holder receive donation and reset holder's priority back to base
+
+  //do computing stuff of lock max_priority
+
+  //release the lock
   lock->holder = NULL;
   sema_up(&lock->semaphore);
 }
