@@ -89,11 +89,22 @@ struct thread {
   int priority;              /* Priority. */
   struct list_elem allelem;  /* List element for all threads list. */
 
-  int64_t wake_up_time; //the time the thread suppose to wake up
+  /* Owned by timer.c for waking threads up during appropriate ticks. */
+  int64_t wake_up_time;
   struct list_elem timer_elem;
 
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
+
+  /* All locks that this thread is currently holding. */
+  struct list acquired_locks;
+
+  /* If this thread is waiting on a lock, keep track of the lock. */
+  struct lock* waiting_lock;
+
+  /* Owned by thread.c for strict thread priority scheduling. */
+  int effective_priority;
+  int base_priority;
 
 #ifdef USERPROG
   /* Owned by process.c. */
@@ -150,5 +161,9 @@ int thread_get_nice(void);
 void thread_set_nice(int);
 int thread_get_recent_cpu(void);
 int thread_get_load_avg(void);
+
+//for pintos-list less compare fun
+bool compare_thread_priority(const struct list_elem* elem1, const struct list_elem* elem2,
+                             void* aux UNUSED);
 
 #endif /* threads/thread.h */
