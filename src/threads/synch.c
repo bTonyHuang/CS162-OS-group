@@ -190,19 +190,31 @@ void lock_acquire(struct lock* lock) {
   enum intr_level old_level = intr_disable();
 
   struct thread* t = thread_current();
+  t->waiting_lock = lock;
+  struct thread* curr_thread = t;
 
   //the lock is holding by another thread, check the need of priodonation
   if (lock->holder) {
-    if (t->effective_priority > lock->max_priority) {
-      lock->max_priority = t->effective_priority;
-      lock->holder->effective_priority = t->effective_priority;
+    while (curr_thread != NULL && curr_thread->waiting_lock != NULL) {
+      /* Edge case ex: 60, 20, 40 priority chain. */
+      if (t->effective_priority <= lock->max_priority) {
+        break;
+      }
+      curr_thread->waiting_lock->max_priority = curr_thread->effective_priority;
+      curr_thread->waiting_lock->holder->effective_priority = curr_thread->effective_priority;
+      /* Continue to next thread along the 'slide'. */
+      curr_thread = curr_thread->waiting_lock->holder;
     }
+    lock->max_priority = t->effective_priority;
+    lock->holder->effective_priority = t->effective_priority;
   }
 
   //put the thread in the waiter list
   sema_down(&lock->semaphore);
 
-  //got the lock now, set max_priority and holder (this thread must be the highest priority waiter)
+  t->waiting_lock = NULL;
+
+  //got the lock now, set max_priority and holder (this thread must have been the highest priority waiter)
   list_push_back(&t->acquired_locks, &lock->lock_elem);
   lock->max_priority = t->effective_priority;
   lock->holder = t;
