@@ -197,7 +197,7 @@ void lock_acquire(struct lock* lock) {
   if (lock->holder) {
     while (curr_thread != NULL && curr_thread->waiting_lock != NULL) {
       /* Edge case ex: 60, 20, 40 priority chain. */
-      if (t->effective_priority <= lock->max_priority) {
+      if (curr_thread->effective_priority <= lockk->max_priority) {
         break;
       }
       curr_thread->waiting_lock->max_priority = curr_thread->effective_priority;
@@ -205,8 +205,8 @@ void lock_acquire(struct lock* lock) {
       /* Continue to next thread along the 'slide'. */
       curr_thread = curr_thread->waiting_lock->holder;
     }
-    lock->max_priority = t->effective_priority;
-    lock->holder->effective_priority = t->effective_priority;
+    // lock->max_priority = t->effective_priority;
+    // lock->holder->effective_priority = t->effective_priority;
   }
 
   //put the thread in the waiter list
