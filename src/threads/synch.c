@@ -197,7 +197,7 @@ void lock_acquire(struct lock* lock) {
   if (lock->holder) {
     while (curr_thread != NULL && curr_thread->waiting_lock != NULL) {
       /* Edge case ex: 60, 20, 40 priority chain. */
-      if (curr_thread->effective_priority <= lockk->max_priority) {
+      if (curr_thread->effective_priority <= curr_thread->waiting_lock->max_priority) {
         break;
       }
       curr_thread->waiting_lock->max_priority = curr_thread->effective_priority;
