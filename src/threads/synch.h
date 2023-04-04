@@ -22,7 +22,7 @@ struct lock {
   struct semaphore semaphore; /* Binary semaphore controlling access. */
 
   /* Allow thread structs to keep track of a list of their acquired locks. */
-  struct list_elem elem;
+  struct list_elem lock_elem;
 
   /* The maximum priority across all waiters on this lock. Used for priority donations. */
   int max_priority;

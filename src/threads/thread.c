@@ -203,10 +203,6 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Initialize thread. */
   init_thread(t, name, priority);
-  /* Preempt current thread in thread_create if the new thread's priority is higher. */
-  if (priority > thread_current()->effective_priority) {
-    intr_yield_on_return();
-  }
   tid = t->tid = allocate_tid();
 
   /* Stack frame for kernel_thread(). */
@@ -227,6 +223,9 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
 
   /* Add to run queue. */
   thread_unblock(t);
+  
+  //preempt defensively
+  thread_yield();
 
   return tid;
 }
@@ -256,7 +255,6 @@ static void thread_enqueue(struct thread* t) {
   if (active_sched_policy == SCHED_FIFO) 
     list_push_back(&fifo_ready_list, &t->elem);
   else if (active_sched_policy == SCHED_PRIO)
-
     list_push_back(&prio_ready_list, &t->elem);
   else
     PANIC("Unimplemented scheduling policy value: %d", active_sched_policy);
@@ -353,12 +351,9 @@ void thread_foreach(thread_action_func* func, void* aux) {
 void thread_set_priority(int new_priority) {
   ASSERT(intr_get_level() == INTR_ON);
 
-  struct thread* t = thread_current();
-
-
   enum intr_level old_level = intr_disable();
 
-
+  struct thread* t = thread_current();
   t->base_priority = new_priority;
 
   /* Recompute the effective_priority to see if it needs to be updated. */
@@ -370,7 +365,7 @@ void thread_set_priority(int new_priority) {
 
   for (iter = list_begin(&t->acquired_locks); iter != list_end(&t->acquired_locks);
        iter = list_next(iter)) {
-    curr_lock = list_entry(iter, struct lock, elem);
+    curr_lock = list_entry(iter, struct lock, lock_elem);
 
     /* Check the max_priority of that lock, update our max_priority var if necessary. */
     if (curr_lock->max_priority > max_priority) {
@@ -380,13 +375,12 @@ void thread_set_priority(int new_priority) {
 
   t->effective_priority = max_priority;
 
-  /* Yield if current thread is no longer the highest priority thread. */
+  intr_set_level(old_level);
 
   struct thread* highest_prio_thread =
       list_entry(list_max(&prio_ready_list, compare_thread_priority, NULL), struct thread, elem);
 
-  intr_set_level(old_level);
-
+  /* Yield if current thread is no longer the highest priority thread. */
   if (t->effective_priority < highest_prio_thread->effective_priority) {
     thread_yield();
   }

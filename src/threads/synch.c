@@ -102,12 +102,20 @@ void sema_up(struct semaphore* sema) {
   ASSERT(sema != NULL);
 
   old_level = intr_disable();
+  sema->value++;
   if (!list_empty(&sema->waiters)){
     struct list_elem* e = list_max(&sema->waiters, compare_thread_priority, NULL);
     list_remove(e);
-    thread_unblock(list_entry(e, struct thread, elem));
+    struct thread* wake_up_thread = list_entry(e, struct thread, elem);
+    thread_unblock(wake_up_thread);
+
+    if (thread_current()->effective_priority < wake_up_thread->effective_priority){
+      if(intr_context())
+        intr_yield_on_return();
+      else
+        thread_yield();
+    }
   }
-  sema->value++;
   intr_set_level(old_level);
 }
 
@@ -179,14 +187,27 @@ void lock_acquire(struct lock* lock) {
   ASSERT(!intr_context());
   ASSERT(!lock_held_by_current_thread(lock));
 
-  //the lock is holding by another thread, check the need of priodonation
-  if(lock->holder){
+  enum intr_level old_level = intr_disable();
 
+  struct thread* t = thread_current();
+
+  //the lock is holding by another thread, check the need of priodonation
+  if (lock->holder) {
+    if (t->effective_priority > lock->max_priority) {
+      lock->max_priority = t->effective_priority;
+      lock->holder->effective_priority = t->effective_priority;
+    }
   }
 
   //put the thread in the waiter list
   sema_down(&lock->semaphore);
-  lock->holder = thread_current();
+
+  //got the lock now, set max_priority and holder (this thread must be the highest priority waiter)
+  list_push_back(&t->acquired_locks, &lock->lock_elem);
+  lock->max_priority = t->effective_priority;
+  lock->holder = t;
+
+  intr_set_level(old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -202,8 +223,12 @@ bool lock_try_acquire(struct lock* lock) {
   ASSERT(!lock_held_by_current_thread(lock));
 
   success = sema_try_down(&lock->semaphore);
-  if (success)
-    lock->holder = thread_current();
+  if (success) {
+    struct thread* t = thread_current();
+    list_push_back(&t->acquired_locks, &lock->lock_elem);
+    lock->max_priority = t->effective_priority;
+    lock->holder = t;
+  }
   return success;
 }
 
@@ -216,13 +241,43 @@ void lock_release(struct lock* lock) {
   ASSERT(lock != NULL);
   ASSERT(lock_held_by_current_thread(lock));
 
-  //check if the holder receive donation and reset holder's priority back to base
+  enum intr_level old_level = intr_disable();
 
-  //do computing stuff of lock max_priority
+  //remove the lock from the holder->acquired_locks
+  list_remove(&lock->lock_elem);
 
-  //release the lock
+  //reset lock max_priority and holder
+  lock->max_priority = 0;
   lock->holder = NULL;
+
+  //reset priority, also check if holder has other locks, yield at last
+  //thread_set_priority(holder->base_priority);
+  //holder->effective_priority = holder->base_priority;
+  struct thread* t = thread_current();
+
+  /* Recompute the effective_priority to see if it needs to be updated. */
+  int max_priority = t->base_priority;
+
+  struct list_elem* iter;
+  struct lock* curr_lock;
+
+  for (iter = list_begin(&t->acquired_locks); iter != list_end(&t->acquired_locks);
+       iter = list_next(iter)) {
+    curr_lock = list_entry(iter, struct lock, lock_elem);
+
+    /* Check the max_priority of that lock, update our max_priority var if necessary. */
+    if (curr_lock->max_priority > max_priority) {
+      max_priority = curr_lock->max_priority;
+    }
+  }
+
+  t->effective_priority = max_priority;
+
+  //release the lock, put the highest priority waiter on ready queue
   sema_up(&lock->semaphore);
+
+  //thread_set_priority need intr_on
+  intr_set_level(old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false
