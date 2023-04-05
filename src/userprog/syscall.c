@@ -173,8 +173,7 @@ int sys_pthread_exit(void) {
 
 /* Pthread join system call. */
 int sys_pthread_join(tid_t tid) {
-  pthread_join(tid);
-  return tid;
+  return pthread_join(tid);
 }
 
 /* Lock init system call. */

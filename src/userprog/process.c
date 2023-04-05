@@ -922,7 +922,7 @@ tid_t pthread_join(tid_t tid) {
     struct join_status* js = list_entry(e, struct join_status, elem);
     if (js->tid == tid) {
       // drop all currently held acquired_locks before blocking on the semaphore, this prevents deadlock
-
+      lock_release(&t->pcb->join_lock);
       js->joined = true;
       list_remove(e);   // maybe remove that join_status from the list after we wake up (after sema_down)
       sema_down(&js->dead);
@@ -931,7 +931,7 @@ tid_t pthread_join(tid_t tid) {
     }
   }
   lock_release(&t->pcb->join_lock);
-  return -1;
+  return TID_ERROR;
 
   // locking
   // https://edstem.org/us/courses/33980/discussion/2705592?comment=6616898
