@@ -55,7 +55,7 @@ void userprog_init(void) {
   success = t->pcb != NULL;
 
   /* Main only needs a list of children */
-  if (success)
+  if (success) {
     list_init(&t->pcb->children);
     list_init(&t->pcb->join_statuses);
     //
@@ -67,6 +67,7 @@ void userprog_init(void) {
     //
     // initialize any necessary locks for the pcb
     lock_init(&t->pcb->join_lock);
+  }
 
   /* Kill the kernel if we did not succeed */
   ASSERT(success);
@@ -125,7 +126,11 @@ static void start_process(void* exec_) {
     // Continue initializing the PCB as normal
     list_init(&t->pcb->children);
     list_init(&t->pcb->fds);
+    list_init(&t->pcb->lds);
+    list_init(&t->pcb->semaphores);
     t->pcb->next_handle = 2;
+    t->pcb->next_lock_handle = (char) 0;
+    t->pcb->next_sema_handle = 0;
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
     list_init(&t->pcb->join_statuses);
@@ -722,7 +727,7 @@ struct thread_exec_info {
   stub_fun sf;
   pthread_fun tf;
   void* arg;
-  struct process pcb;                   /* Creator thread needs to tell new thread the process it belongs to. */
+  struct process* pcb;                   /* Creator thread needs to tell new thread the process it belongs to. */
   struct join_status* join_status;      /* Newly spawned thread. */
 
   struct semaphore load_done;           /* "Up"ed when loading complete. */
@@ -739,12 +744,12 @@ bool init_thread_stack(uint8_t* kpage, uint8_t* upage, pthread_fun tf, void* arg
   char* thread_func;
 
   /* Push arg. */
-  argument = push(kpage, &ofs, arg, sizeof(void*));
+  argument = push(kpage, &ofs, &arg, sizeof(void*));
   if (argument == NULL)
     return false;
 
   /* Push thread func. */
-  thread_func = push(kpage, &ofs, tf, sizeof(pthread_fun));
+  thread_func = push(kpage, &ofs, &tf, sizeof(pthread_fun));
   if (thread_func == NULL)
     return false;
 
@@ -779,16 +784,15 @@ bool setup_page(pthread_fun tf, void* arg, void** esp) {
   if (kpage != NULL) {
     /* Find an open upage address to map the kpage. */
     // https://edstem.org/us/courses/33980/discussion/2705592?comment=6303123
-    int i = 0;
-    uint8_t* upage;
+    uint8_t* upage = ((uint8_t*)PHYS_BASE) - PGSIZE;
     while (!success) {
-      i++;
-      upage = ((uint8_t*)PHYS_BASE) - PGSIZE * i;
       if (pagedir_get_page(t->pcb->pagedir, upage) == NULL) {
         success = install_page(upage, kpage, true);
         t->thread_stack_page = upage;
+        t->thread_kernel_page = kpage;
         break;
       }
+      upage = upage - PGSIZE;
     }
     
     if (success) {
@@ -825,7 +829,7 @@ tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) {
   sema_init(&exec.load_done, 0);   
 
   /* Create a new thread to execute FILE_NAME. */
-  strlcpy(thread_name, t->pcb->process_name, sizeof thread_name);
+  // strlcpy(thread_name, thread_current()->pcb->process_name, sizeof thread_name);
   tid = thread_create(thread_name, PRI_DEFAULT, start_pthread, &exec);
   if (tid != TID_ERROR) {
     sema_down(&exec.load_done);
@@ -878,12 +882,12 @@ static void start_pthread(void* exec_) {
     if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
-    success = setup_thread(exec->tf, exec->arg, &if_.esp);
+    success = setup_page(exec->tf, exec->arg, &if_.esp);
   }
 
   if (success) {
     /* Start address. */
-    if_.eip = exec->sf;
+    if_.eip = (void (*)(void)) exec->sf;
   }
 
   /* Handle failure with successful join_status malloc */
@@ -910,26 +914,25 @@ static void start_pthread(void* exec_) {
    now, it does nothing. */
 tid_t pthread_join(tid_t tid) { 
   struct thread* t = thread_current();
+
   lock_acquire(&t->pcb->join_lock);
   struct list_elem* e;
-  
-  for (join_status in threads join_status_list:) {
-    (check/do something with join_status)
-  }
 
   for (e = list_begin(&t->pcb->join_statuses); e != list_end(&t->pcb->join_statuses); e = list_next(e)) {
-    struct wait_status* cs = list_entry(e, struct wait_status, elem);
-    if (cs->pid == child_pid) {
-      int exit_code;
-      list_remove(e);
-      sema_down(&cs->dead);
-      exit_code = cs->exit_code;
-      release_child(cs);
-      return exit_code;
+    struct join_status* js = list_entry(e, struct join_status, elem);
+    if (js->tid == tid) {
+      // drop all currently held acquired_locks before blocking on the semaphore, this prevents deadlock
+
+      js->joined = true;
+      list_remove(e);   // maybe remove that join_status from the list after we wake up (after sema_down)
+      sema_down(&js->dead);
+      free(js);         // maybe too general, might exist edge cases with freeing ;)
+      return tid;
     }
   }
   lock_release(&t->pcb->join_lock);
   return -1;
+
   // locking
   // https://edstem.org/us/courses/33980/discussion/2705592?comment=6616898
   // https://edstem.org/us/courses/33980/discussion/2705592?comment=6469427
@@ -944,7 +947,20 @@ tid_t pthread_join(tid_t tid) {
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit(void) {}
+void pthread_exit(void) {
+  struct thread* t = thread_current();
+
+  /* Free the physical stack page. */
+  // uint8_t* page_to_dealloc = pagedir_get_page(t->pcb->pagedir, pg_round_down(t->thread_stack_page));
+  /* Remove the mapping from upage to kpage in the kernel. */
+  pagedir_clear_page(t->pcb->pagedir, pg_round_down(t->thread_stack_page));
+  palloc_free_page(t->thread_kernel_page);
+
+
+  sema_up(&t->join_status->dead);
+
+  thread_exit();
+}
 
 /* Only to be used when the main thread explicitly calls pthread_exit.
    The main thread should wait on all threads in the process to

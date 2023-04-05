@@ -160,30 +160,99 @@ static char* copy_in_string(const char* us) {
 /* Pthread create system call. */
 int sys_pthread_create(stub_fun sfun, pthread_fun tfun, const void* arg) {
   pthread_execute(sfun, tfun, arg);
-  return -1; /* TID_ERROR */
+  return 0; /* TID_ERROR */
 }
 
 /* Pthread exit system call. */
-void sys_pthread_exit() {
+int sys_pthread_exit(void) {
+  pthread_exit();
 }
 
 /* Pthread join system call. */
-tid_t sys_pthread_join(tid_t tid) {
-  return -1;
+int sys_pthread_join(tid_t tid) {
+  pthread_join(tid);
+  return tid;
 }
 
 /* Lock init system call. */
-bool lock_init(lock_t* lock) {
-  return false;
+int sys_lock_init(char* lock_ptr) {
+  const char* kptr = copy_in_string(lock_ptr);
+  struct lock_descriptor* ld;
+  char handle;
+
+  ld = malloc(sizeof *ld);
+  if (ld != NULL) {
+    // lock_acquire(&fs_lock);   // use a different global lock
+    lock_init(&ld->kernel_lock);
+    struct thread* cur = thread_current();
+    handle = ld->handle = cur->pcb->next_lock_handle++;
+    list_push_front(&cur->pcb->lds, &ld->elem);
+    put_user(lock_ptr, handle);
+    // *lock_ptr = handle; // bad, fix later
+    // lock_release(&fs_lock);   // use a different global lock
+  } else {
+    free(ld);
+  }
+
+  palloc_free_page(kptr);
+  return 1;
 }
 
-      // {1, (syscall_function*)sys_lock_init},
-      // {1, (syscall_function*)sys_lock_acquire},
-      // {1, (syscall_function*)sys_lock_release},
-      // {2, (syscall_function*)sys_sema_init},
-      // {1, (syscall_function*)sys_sema_down},
-      // {1, (syscall_function*)sys_sema_up},
-      // {0, (syscall_function*)sys_get_tid},
+/* Returns the lock descriptor associated with the given handle.
+   Terminates the process if HANDLE is not associated with an
+   initialized lock. */
+static struct lock_descriptor* lookup_ld(char* lock_ptr) {
+  struct thread* cur = thread_current();
+  struct list_elem* e;
+
+  for (e = list_begin(&cur->pcb->lds); e != list_end(&cur->pcb->lds); e = list_next(e)) {
+    struct lock_descriptor* ld;
+    ld = list_entry(e, struct lock_descriptor, elem);
+    if (ld->handle == (char) *lock_ptr)
+      return ld;
+  }
+
+  process_exit();
+  NOT_REACHED();
+}
+
+int sys_lock_acquire(char* lock_ptr) {
+  struct lock_descriptor* ld;
+  ld = lookup_ld(lock_ptr);
+
+  // lock_acquire(&fs_lock);
+  lock_acquire(&ld->kernel_lock);
+  // lock_release(&fs_lock);
+
+  return 0;
+}
+
+int sys_lock_release(char* lock_ptr) {
+  struct lock_descriptor* ld;
+  ld = lookup_ld(lock_ptr);
+
+  // lock_acquire(&fs_lock);
+  lock_release(&ld->kernel_lock);
+  // lock_release(&fs_lock);
+
+  return 0;
+}
+
+int sys_sema_init(const char* ufile) {
+
+}
+
+int sys_sema_down(int handle) {
+
+}
+
+int sys_sema_up(int handle) {
+
+}
+
+int sys_get_tid(void) {
+
+}
 
 /* Halt system call. */
 int sys_halt(void) { shutdown_power_off(); }

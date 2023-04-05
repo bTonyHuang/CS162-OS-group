@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/fixed-point.h"
+#include "userprog/process.h"
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -110,6 +111,7 @@ struct thread {
 
   /* Stored for eventual deallocation of the thread page. */
   uint8_t* thread_stack_page;
+  uint8_t* thread_kernel_page;
 
 #ifdef USERPROG
   /* Owned by process.c. */
@@ -118,22 +120,6 @@ struct thread {
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
-};
-
-/* Tracks the completion of a thread.
-   Reference held by the process, in its `thread_statuses' list,
-   and by the thread, in its `thread_status' pointer. */
-struct join_status {
-  struct list_elem elem; /* `thread_statuses' list element. */
-  struct lock lock;      /* Protects ref_cnt and the joined flag. */
-  // https://edstem.org/us/courses/33980/discussion/2705592?comment=6615279
-  bool joined;           /* Whether or not another thread is currently joined on this one. */
-  int ref_cnt;           /* 2=thread and process both alive,
-                                           1=either thread or process alive,
-                                           0=thread and process both dead. */
-  tid_t tid;             /* Thread id. */
-  /* Exit code value not needed, since we're a thread, not a process. */
-  struct semaphore dead;
 };
 
 /* Types of scheduler that the user can request the kernel

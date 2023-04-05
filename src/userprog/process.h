@@ -12,6 +12,9 @@
 #define MAX_ARGS 1024
 #define MAX_THREADS 127
 
+typedef int tid_t;
+#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
+
 /* PIDs and TIDs are the same type. PID should be
    the TID of the main thread of the process */
 typedef tid_t pid_t;
@@ -36,10 +39,33 @@ struct process {
 
   struct list join_statuses;       /* Join status nodes of threads available to join on. */
   struct lock join_lock;           /* Process wide lock for accessing the list of join statuses. */
+  // prob wanna make the join_lock a general case thread_operations_lock
 
   /* Owned by syscall.c. */
   struct list fds; /* List of file descriptors. */
   int next_handle; /* Next handle value. */
+
+  struct list lds;
+  char next_lock_handle;
+
+  struct list semaphores;
+  int next_sema_handle;
+};
+
+/* Tracks the completion of a thread.
+   Reference held by the process, in its `thread_statuses' list,
+   and by the thread, in its `thread_status' pointer. */
+struct join_status {
+  struct list_elem elem; /* `thread_statuses' list element. */
+  struct lock lock;      /* Protects ref_cnt and the joined flag. */
+  // https://edstem.org/us/courses/33980/discussion/2705592?comment=6615279
+  bool joined;           /* Whether or not another thread is currently joined on this one. */
+  int ref_cnt;           /* 2=thread and process both alive,
+                                           1=either thread or process alive,
+                                           0=thread and process both dead. */
+  tid_t tid;             /* Thread id. */
+  /* Exit code value not needed, since we're a thread, not a process. */
+  struct semaphore dead;
 };
 
 /* Tracks the completion of a process.
@@ -61,6 +87,12 @@ struct file_descriptor {
   struct list_elem elem; /* List element. */
   struct file* file;     /* File. */
   int handle;            /* File handle. */
+};
+
+struct lock_descriptor {
+  struct list_elem elem;
+  struct lock kernel_lock;
+  char handle;
 };
 
 void userprog_init(void);
