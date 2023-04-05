@@ -57,6 +57,16 @@ void userprog_init(void) {
   /* Main only needs a list of children */
   if (success)
     list_init(&t->pcb->children);
+    list_init(&t->pcb->join_statuses);
+    //
+    //
+    //
+    //
+    //
+    //
+    //
+    // initialize any necessary locks for the pcb
+    lock_init(&t->pcb->join_lock);
 
   /* Kill the kernel if we did not succeed */
   ASSERT(success);
@@ -118,6 +128,8 @@ static void start_process(void* exec_) {
     t->pcb->next_handle = 2;
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+    list_init(&t->pcb->join_statuses);
+    lock_init(&t->pcb->join_lock);
   }
 
   /* Allocate wait_status. */
@@ -689,15 +701,105 @@ bool is_main_thread(struct thread* t, struct process* p) { return p->main_thread
 /* Gets the PID of a process */
 pid_t get_pid(struct process* p) { return (pid_t)p->main_thread->tid; }
 
+/**************************************************************************************
+ *                                                                                    *
+ *                                                                                    *
+ *                                                                                    *
+ *                                                                                    *
+ *                                                                                    *
+ *                                 THREADS                                            *
+ *                                                                                    *
+ *                                                                                    *
+ *                                                                                    *
+ *                                                                                    *
+ *                                                                                    *
+ **************************************************************************************/
+
+/* Data structure shared between pthread_execute() in the
+   invoking thread and start_pthread() in the newly invoked
+   thread. */
+struct thread_exec_info {
+  stub_fun sf;
+  pthread_fun tf;
+  void* arg;
+  struct process pcb;                   /* Creator thread needs to tell new thread the process it belongs to. */
+  struct join_status* join_status;      /* Newly spawned thread. */
+
+  struct semaphore load_done;           /* "Up"ed when loading complete. */
+  bool success;                         /* Thread successfully loaded? */
+};
+
+/* Sets up threadfunc and void* arg arguments in KPAGE, which will be mapped
+   to UPAGE in user space.  Sets *ESP to the initial
+   stack pointer for the thread. */
+bool init_thread_stack(uint8_t* kpage, uint8_t* upage, pthread_fun tf, void* arg, void** esp) {
+  size_t ofs = PGSIZE;
+  char* const null = NULL;
+  char* argument;
+  char* thread_func;
+
+  /* Push arg. */
+  argument = push(kpage, &ofs, arg, sizeof(void*));
+  if (argument == NULL)
+    return false;
+
+  /* Push thread func. */
+  thread_func = push(kpage, &ofs, tf, sizeof(pthread_fun));
+  if (thread_func == NULL)
+    return false;
+
+  // Insert padding to ensure the stack pointer will ultimately be 16-byte-aligned
+  // size_t alignment_adjustment =
+  //     ((PGSIZE - ofs) + (argc + 1) * sizeof(char*) + sizeof(char**) + sizeof(int)) % 16;
+  // ofs -= 16 - alignment_adjustment;
+
+  /* Push a fake "return address". */
+  if (push(kpage, &ofs, &null, sizeof null) == NULL)
+    return false;
+
+  /* Set initial stack pointer. */
+  *esp = upage + ofs;
+  return true;
+}
+
 /* Creates a new stack for the thread and sets up its arguments.
-   Stores the thread's entry point into *EIP and its initial stack
+   Stores the thread's entry point into *EIP (start_pthread does this now) and its initial stack
    pointer into *ESP. Handles all cleanup if unsuccessful. Returns
    true if successful, false otherwise.
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. You may find it necessary to change the
    function signature. */
-bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; }
+bool setup_page(pthread_fun tf, void* arg, void** esp) { 
+  uint8_t* kpage;
+  bool success = false;
+  struct thread* t = thread_current();
+
+  kpage = palloc_get_page(PAL_USER | PAL_ZERO);
+  if (kpage != NULL) {
+    /* Find an open upage address to map the kpage. */
+    // https://edstem.org/us/courses/33980/discussion/2705592?comment=6303123
+    int i = 0;
+    uint8_t* upage;
+    while (!success) {
+      i++;
+      upage = ((uint8_t*)PHYS_BASE) - PGSIZE * i;
+      if (pagedir_get_page(t->pcb->pagedir, upage) == NULL) {
+        success = install_page(upage, kpage, true);
+        t->thread_stack_page = upage;
+        break;
+      }
+    }
+    
+    if (success) {
+      success = init_thread_stack(kpage, upage, tf, arg, esp);
+    } else {
+      palloc_free_page(kpage);
+    }
+  }
+
+  return success;
+}
 
 /* Starts a new thread with a new user stack running SF, which takes
    TF and ARG as arguments on its user stack. This new thread may be
@@ -708,7 +810,33 @@ bool setup_thread(void (**eip)(void) UNUSED, void** esp UNUSED) { return false; 
    This function will be implemented in Project 2: Multithreading and
    should be similar to process_execute (). For now, it does nothing.
    */
-tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSED) { return -1; }
+tid_t pthread_execute(stub_fun sf, pthread_fun tf, void* arg) { 
+  /* Package sf, tf, arg, pcb, and initialize sema for the new thread. */
+  struct thread_exec_info exec;
+  char thread_name[16];
+  tid_t tid;
+
+  /* Initialize exec_info. */
+  exec.sf = sf;
+  exec.tf = tf;
+  exec.arg = arg;
+  exec.pcb = thread_current()->pcb;
+  exec.success = false;
+  sema_init(&exec.load_done, 0);   
+
+  /* Create a new thread to execute FILE_NAME. */
+  strlcpy(thread_name, t->pcb->process_name, sizeof thread_name);
+  tid = thread_create(thread_name, PRI_DEFAULT, start_pthread, &exec);
+  if (tid != TID_ERROR) {
+    sema_down(&exec.load_done);
+    if (exec.success)
+      list_push_back(&thread_current()->pcb->join_statuses, &exec.join_status->elem);
+    else
+      tid = TID_ERROR;
+  }
+
+  return tid;
+}
 
 /* A thread function that creates a new user thread and starts it
    running. Responsible for adding itself to the list of threads in
@@ -716,7 +844,62 @@ tid_t pthread_execute(stub_fun sf UNUSED, pthread_fun tf UNUSED, void* arg UNUSE
 
    This function will be implemented in Project 2: Multithreading and
    should be similar to start_process (). For now, it does nothing. */
-static void start_pthread(void* exec_ UNUSED) {}
+static void start_pthread(void* exec_) {
+  // setup_thread(**eip, **esp, sf + tf + arg)
+
+  struct thread* t = thread_current();
+
+  struct thread_exec_info* exec = exec_;
+  struct intr_frame if_;
+  uint32_t fpu_curr[27];
+  bool success, join_status_success;
+
+  /* Set the process control block for this new thread */
+  t->pcb = exec->pcb;
+  process_activate();
+
+  /* Allocate join_status. */
+  exec->join_status = t->join_status = malloc(sizeof *exec->join_status);
+  success = join_status_success = exec->join_status != NULL;
+
+  /* Initialize join_status. */
+  if (success) {
+    lock_init(&exec->join_status->lock);
+    exec->join_status->joined = false;
+    exec->join_status->ref_cnt = 2;
+    exec->join_status->tid = t->tid;
+    sema_init(&exec->join_status->dead, 0);
+  }
+
+  /* Initialize interrupt frame and load executable. */
+  if (success) {
+    memset(&if_, 0, sizeof if_);
+    fpu_save_init(&if_.fpu, &fpu_curr);
+    if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+    if_.cs = SEL_UCSEG;
+    if_.eflags = FLAG_IF | FLAG_MBS;
+    success = setup_thread(exec->tf, exec->arg, &if_.esp);
+  }
+
+  if (success) {
+    /* Start address. */
+    if_.eip = exec->sf;
+  }
+
+  /* Handle failure with successful join_status malloc */
+  if (!success && join_status_success)
+    free(exec->join_status);
+
+  /* Notify creator thread and clean up. */
+  exec->success = success;
+  sema_up(&exec->load_done);
+  if (!success)
+    thread_exit();
+
+  /* Start the user thread by simulating a return from an interrupt. */
+  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g"(&if_) : "memory");
+  NOT_REACHED();
+}
 
 /* Waits for thread with TID to die, if that thread was spawned
    in the same process and has not been waited on yet. Returns TID on
@@ -725,7 +908,32 @@ static void start_pthread(void* exec_ UNUSED) {}
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-tid_t pthread_join(tid_t tid UNUSED) { return -1; }
+tid_t pthread_join(tid_t tid) { 
+  struct thread* t = thread_current();
+  lock_acquire(&t->pcb->join_lock);
+  struct list_elem* e;
+  
+  for (join_status in threads join_status_list:) {
+    (check/do something with join_status)
+  }
+
+  for (e = list_begin(&t->pcb->join_statuses); e != list_end(&t->pcb->join_statuses); e = list_next(e)) {
+    struct wait_status* cs = list_entry(e, struct wait_status, elem);
+    if (cs->pid == child_pid) {
+      int exit_code;
+      list_remove(e);
+      sema_down(&cs->dead);
+      exit_code = cs->exit_code;
+      release_child(cs);
+      return exit_code;
+    }
+  }
+  lock_release(&t->pcb->join_lock);
+  return -1;
+  // locking
+  // https://edstem.org/us/courses/33980/discussion/2705592?comment=6616898
+  // https://edstem.org/us/courses/33980/discussion/2705592?comment=6469427
+}
 
 /* Free the current thread's resources. Most resources will
    be freed on thread_exit(), so all we have to do is deallocate the

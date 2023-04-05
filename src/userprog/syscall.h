@@ -4,6 +4,10 @@
 #include "threads/thread.h"
 #include "userprog/process.h"
 
+/* Argument types of sys_pthread_create. */
+typedef void (*pthread_fun)(void*);
+typedef void (*stub_fun)(pthread_fun, void*);
+
 int sys_halt(void);
 int sys_exit(int status);
 int sys_exec(const char* ufile);

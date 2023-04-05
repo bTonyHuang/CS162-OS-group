@@ -34,6 +34,9 @@ struct process {
   struct file* bin_file;           /* Executable. */
   struct thread* main_thread;      /* Pointer to main thread */
 
+  struct list join_statuses;       /* Join status nodes of threads available to join on. */
+  struct lock join_lock;           /* Process wide lock for accessing the list of join statuses. */
+
   /* Owned by syscall.c. */
   struct list fds; /* List of file descriptors. */
   int next_handle; /* Next handle value. */

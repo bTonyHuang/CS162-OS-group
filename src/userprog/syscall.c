@@ -53,6 +53,16 @@ static void syscall_handler(struct intr_frame* f) {
       {1, (syscall_function*)sys_close},
       {1, (syscall_function*)sys_practice},
       {1, (syscall_function*)sys_compute_e},
+      {3, (syscall_function*)sys_pthread_create},
+      {0, (syscall_function*)sys_pthread_exit},
+      {1, (syscall_function*)sys_pthread_join},
+      {1, (syscall_function*)sys_lock_init},
+      {1, (syscall_function*)sys_lock_acquire},
+      {1, (syscall_function*)sys_lock_release},
+      {2, (syscall_function*)sys_sema_init},
+      {1, (syscall_function*)sys_sema_down},
+      {1, (syscall_function*)sys_sema_up},
+      {0, (syscall_function*)sys_get_tid},
   };
 
   const struct syscall* sc;
@@ -146,6 +156,34 @@ static char* copy_in_string(const char* us) {
   ks[PGSIZE - 1] = '\0';
   return ks;
 }
+
+/* Pthread create system call. */
+int sys_pthread_create(stub_fun sfun, pthread_fun tfun, const void* arg) {
+  pthread_execute(sfun, tfun, arg);
+  return -1; /* TID_ERROR */
+}
+
+/* Pthread exit system call. */
+void sys_pthread_exit() {
+}
+
+/* Pthread join system call. */
+tid_t sys_pthread_join(tid_t tid) {
+  return -1;
+}
+
+/* Lock init system call. */
+bool lock_init(lock_t* lock) {
+  return false;
+}
+
+      // {1, (syscall_function*)sys_lock_init},
+      // {1, (syscall_function*)sys_lock_acquire},
+      // {1, (syscall_function*)sys_lock_release},
+      // {2, (syscall_function*)sys_sema_init},
+      // {1, (syscall_function*)sys_sema_down},
+      // {1, (syscall_function*)sys_sema_up},
+      // {0, (syscall_function*)sys_get_tid},
 
 /* Halt system call. */
 int sys_halt(void) { shutdown_power_off(); }
