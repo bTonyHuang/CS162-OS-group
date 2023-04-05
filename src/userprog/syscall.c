@@ -179,6 +179,10 @@ int sys_lock_init(char* lock_byte) {
   struct lock_descriptor* ld;
   char handle;
 
+  if (lock_byte == NULL) {
+    return 0;
+  }
+
   ld = malloc(sizeof *ld);
   if (ld != NULL) {
     // lock_acquire(&fs_lock);   // use a different global lock
@@ -204,20 +208,20 @@ int sys_lock_init(char* lock_byte) {
 static struct lock_descriptor* lookup_ld(char* lock_ptr) {
   struct thread* cur = thread_current();
   struct list_elem* e;
-  uint8_t* dst;
-  if (!get_user(dst, (const uint8_t*) lock_ptr)) {
-    process_exit();
-  }
+  // uint8_t* dst;
+  // if (!get_user(dst, (const uint8_t*) lock_ptr)) {
+  //   process_exit();
+  // }
 
 
   for (e = list_begin(&cur->pcb->lds); e != list_end(&cur->pcb->lds); e = list_next(e)) {
     struct lock_descriptor* ld;
     ld = list_entry(e, struct lock_descriptor, elem);
-    if ((uint8_t)ld->handle == *dst)
+    if ((uint8_t)ld->handle == *((uint8_t*)lock_ptr))
       return ld;
   }
 
-  process_exit();
+  sys_exit(1);
   NOT_REACHED();
 }
 
@@ -226,6 +230,9 @@ int sys_lock_acquire(char* lock_ptr) {
   ld = lookup_ld(lock_ptr);
 
   // lock_acquire(&fs_lock);
+  if (lock_held_by_current_thread(&ld->kernel_lock)) {
+    sys_exit(1);
+  }
   lock_acquire(&ld->kernel_lock);
   // lock_release(&fs_lock);
 
@@ -237,6 +244,9 @@ int sys_lock_release(char* lock_ptr) {
   ld = lookup_ld(lock_ptr);
 
   // lock_acquire(&fs_lock);
+  if (!lock_held_by_current_thread(&ld->kernel_lock)) {
+    sys_exit(1);
+  }
   lock_release(&ld->kernel_lock);
   // lock_release(&fs_lock);
 
