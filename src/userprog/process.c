@@ -127,10 +127,10 @@ static void start_process(void* exec_) {
     list_init(&t->pcb->children);
     list_init(&t->pcb->fds);
     list_init(&t->pcb->lds);
-    list_init(&t->pcb->semaphores);
+    list_init(&t->pcb->sds);
     t->pcb->next_handle = 2;
     t->pcb->next_lock_handle = (char) 0;
-    t->pcb->next_sema_handle = 0;
+    t->pcb->next_sema_handle = (char) 0;
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
     list_init(&t->pcb->join_statuses);

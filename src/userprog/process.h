@@ -48,7 +48,7 @@ struct process {
   struct list lds;
   char next_lock_handle;
 
-  struct list semaphores;
+  struct list sds;
   int next_sema_handle;
 };
 
@@ -92,6 +92,12 @@ struct file_descriptor {
 struct lock_descriptor {
   struct list_elem elem;
   struct lock kernel_lock;
+  char handle;
+};
+
+struct sema_descriptor {
+  struct list_elem elem;
+  struct semaphore kernel_sema;
   char handle;
 };
 

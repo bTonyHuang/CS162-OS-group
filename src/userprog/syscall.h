@@ -29,9 +29,9 @@ int sys_pthread_join(int tid);
 int sys_lock_init(char* lock_ptr);
 int sys_lock_acquire(char* lock_ptr);
 int sys_lock_release(char* lock_ptr);
-int sys_sema_init(const char* ufile);
-int sys_sema_down(int handle);
-int sys_sema_up(int handle);
+int sys_sema_init(char* sema_ptr, int val);
+int sys_sema_down(char* sema_ptr);
+int sys_sema_up(char* sema_ptr);
 int sys_get_tid(void);
 
 

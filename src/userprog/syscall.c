@@ -21,9 +21,13 @@ static void copy_in(void*, const void*, size_t);
 /* Serializes file system operations. */
 static struct lock fs_lock;
 
+/* Serializes pcb update operations. */
+static struct lock pcb_lock;
+
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
   lock_init(&fs_lock);
+  lock_init(&pcb_lock);
 }
 
 /* System call handler. */
@@ -159,8 +163,7 @@ static char* copy_in_string(const char* us) {
 
 /* Pthread create system call. */
 int sys_pthread_create(stub_fun sfun, pthread_fun tfun, const void* arg) {
-  pthread_execute(sfun, tfun, arg);
-  return 0; /* TID_ERROR */
+  return pthread_execute(sfun, tfun, arg);
 }
 
 /* Pthread exit system call. */
@@ -175,11 +178,11 @@ int sys_pthread_join(tid_t tid) {
 }
 
 /* Lock init system call. */
-int sys_lock_init(char* lock_byte) {
+int sys_lock_init(char* lock_ptr) {
   struct lock_descriptor* ld;
   char handle;
 
-  if (lock_byte == NULL) {
+  if (lock_ptr == NULL) {
     return 0;
   }
 
@@ -188,16 +191,18 @@ int sys_lock_init(char* lock_byte) {
     // lock_acquire(&fs_lock);   // use a different global lock
     lock_init(&ld->kernel_lock);
     struct thread* cur = thread_current();
+
+    lock_acquire(&pcb_lock);
     handle = ld->handle = cur->pcb->next_lock_handle++;
     list_push_front(&cur->pcb->lds, &ld->elem);
-    put_user((uint8_t*) lock_byte, (uint8_t) handle);
+    lock_release(&pcb_lock);
+
+    put_user((uint8_t*) lock_ptr, (uint8_t) handle);
     // lock_release(&fs_lock);   // use a different global lock
   } else {
     free(ld);
     return 0;
   }
-
-  int size_lds = list_size(&thread_current()->pcb->lds);
 
   return 1;
 }
@@ -213,13 +218,16 @@ static struct lock_descriptor* lookup_ld(char* lock_ptr) {
   //   process_exit();
   // }
 
-
+  lock_acquire(&pcb_lock);
   for (e = list_begin(&cur->pcb->lds); e != list_end(&cur->pcb->lds); e = list_next(e)) {
     struct lock_descriptor* ld;
     ld = list_entry(e, struct lock_descriptor, elem);
-    if ((uint8_t)ld->handle == *((uint8_t*)lock_ptr))
+    if ((uint8_t)ld->handle == *((uint8_t*)lock_ptr)) {
+      lock_release(&pcb_lock);
       return ld;
+    }
   }
+  lock_release(&pcb_lock);
 
   sys_exit(1);
   NOT_REACHED();
@@ -229,12 +237,10 @@ int sys_lock_acquire(char* lock_ptr) {
   struct lock_descriptor* ld;
   ld = lookup_ld(lock_ptr);
 
-  // lock_acquire(&fs_lock);
   if (lock_held_by_current_thread(&ld->kernel_lock)) {
     sys_exit(1);
   }
   lock_acquire(&ld->kernel_lock);
-  // lock_release(&fs_lock);
 
   return 1;
 }
@@ -243,26 +249,94 @@ int sys_lock_release(char* lock_ptr) {
   struct lock_descriptor* ld;
   ld = lookup_ld(lock_ptr);
 
-  // lock_acquire(&fs_lock);
   if (!lock_held_by_current_thread(&ld->kernel_lock)) {
     sys_exit(1);
   }
   lock_release(&ld->kernel_lock);
-  // lock_release(&fs_lock);
 
   return 1;
 }
 
-int sys_sema_init(const char* ufile) {
+int sys_sema_init(char* sema_ptr, int val) {
+  struct sema_descriptor* sd;
+  char handle;
 
+  if (sema_ptr == NULL) {
+    return 0;
+  }
+
+  if (val < 0) {
+    return 0;
+  }
+
+  sd = malloc(sizeof *sd);
+  if (sd != NULL) {
+    sema_init(&sd->kernel_sema, val);
+    struct thread* cur = thread_current();
+
+    lock_acquire(&pcb_lock);
+    handle = sd->handle = cur->pcb->next_sema_handle++;
+    list_push_front(&cur->pcb->sds, &sd->elem);
+    lock_release(&pcb_lock);
+
+    put_user((uint8_t*) sema_ptr, (uint8_t) handle);
+  } else {
+    free(sd);
+    return 0;
+  }
+
+  return 1;
 }
 
-int sys_sema_down(int handle) {
+/* Returns the sema descriptor associated with the given handle.
+   Terminates the process if HANDLE is not associated with an
+   initialized semaphore. */
+static struct sema_descriptor* lookup_sd(char* sema_ptr) {
+  struct thread* cur = thread_current();
+  struct list_elem* e;
+  // uint8_t* dst;
+  // if (!get_user(dst, (const uint8_t*) sema_ptr)) {
+  //   process_exit();
+  // }
 
+  lock_acquire(&pcb_lock);
+  for (e = list_begin(&cur->pcb->sds); e != list_end(&cur->pcb->sds); e = list_next(e)) {
+    struct sema_descriptor* sd;
+    sd = list_entry(e, struct sema_descriptor, elem);
+    // 
+    if ((uint8_t)sd->handle == *((uint8_t*)sema_ptr)) {
+      lock_release(&pcb_lock);
+      return sd;
+    }
+  }
+  lock_release(&pcb_lock);
+
+  sys_exit(1);
+  NOT_REACHED();
 }
 
-int sys_sema_up(int handle) {
+int sys_sema_down(char* sema_ptr) {
+  struct sema_descriptor* sd;
+  sd = lookup_sd(sema_ptr);
 
+  // if (lock_held_by_current_thread(&ld->kernel_lock)) {
+  //   sys_exit(1);
+  // }
+  sema_down(&sd->kernel_sema);
+
+  return 1;
+}
+
+int sys_sema_up(char* sema_ptr) {
+  struct sema_descriptor* sd;
+  sd = lookup_sd(sema_ptr);
+
+  // if (!lock_held_by_current_thread(&ld->kernel_lock)) {
+  //   sys_exit(1);
+  // }
+  sema_up(&sd->kernel_sema);
+
+  return 1;
 }
 
 int sys_get_tid(void) {
