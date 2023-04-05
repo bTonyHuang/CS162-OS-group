@@ -175,8 +175,7 @@ int sys_pthread_join(tid_t tid) {
 }
 
 /* Lock init system call. */
-int sys_lock_init(char* lock_ptr) {
-  const char* kptr = copy_in_string(lock_ptr);
+int sys_lock_init(char* lock_byte) {
   struct lock_descriptor* ld;
   char handle;
 
@@ -187,14 +186,15 @@ int sys_lock_init(char* lock_ptr) {
     struct thread* cur = thread_current();
     handle = ld->handle = cur->pcb->next_lock_handle++;
     list_push_front(&cur->pcb->lds, &ld->elem);
-    put_user(lock_ptr, handle);
-    // *lock_ptr = handle; // bad, fix later
+    put_user((uint8_t*) lock_byte, (uint8_t) handle);
     // lock_release(&fs_lock);   // use a different global lock
   } else {
     free(ld);
+    return 0;
   }
 
-  palloc_free_page(kptr);
+  int size_lds = list_size(&thread_current()->pcb->lds);
+
   return 1;
 }
 
@@ -204,11 +204,16 @@ int sys_lock_init(char* lock_ptr) {
 static struct lock_descriptor* lookup_ld(char* lock_ptr) {
   struct thread* cur = thread_current();
   struct list_elem* e;
+  uint8_t* dst;
+  if (!get_user(dst, (const uint8_t*) lock_ptr)) {
+    process_exit();
+  }
+
 
   for (e = list_begin(&cur->pcb->lds); e != list_end(&cur->pcb->lds); e = list_next(e)) {
     struct lock_descriptor* ld;
     ld = list_entry(e, struct lock_descriptor, elem);
-    if (ld->handle == (char) *lock_ptr)
+    if ((uint8_t)ld->handle == *dst)
       return ld;
   }
 
@@ -224,7 +229,7 @@ int sys_lock_acquire(char* lock_ptr) {
   lock_acquire(&ld->kernel_lock);
   // lock_release(&fs_lock);
 
-  return 0;
+  return 1;
 }
 
 int sys_lock_release(char* lock_ptr) {
@@ -235,7 +240,7 @@ int sys_lock_release(char* lock_ptr) {
   lock_release(&ld->kernel_lock);
   // lock_release(&fs_lock);
 
-  return 0;
+  return 1;
 }
 
 int sys_sema_init(const char* ufile) {
@@ -251,7 +256,8 @@ int sys_sema_up(int handle) {
 }
 
 int sys_get_tid(void) {
-
+  struct thread* t = thread_current();
+  return t->tid;
 }
 
 /* Halt system call. */
