@@ -10,7 +10,8 @@
 static lock_t console_lock;
 const char* test_name;
 bool quiet = false;
-bool syn_msg = false;
+/*the test code only uses the console lock when syn_msg (defined in tests/lib.c) is set to true.*/
+bool syn_msg = true;
 
 void console_init() { lock_check_init(&console_lock); }
 

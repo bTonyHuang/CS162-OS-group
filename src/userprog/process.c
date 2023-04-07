@@ -230,6 +230,12 @@ int process_wait(pid_t child_pid) {
 }
 
 /* Free the current process's resources. */
+/* process_exit should have an algorithm that allows the exiting thread to kill other threads 
+in a way that ensures that resources are not leaked. 
+In the staff solution, this is done by waiting for the thread to trap back to userspace, 
+and directing it to pthread_exit. Don’t forget to wake any joining threads on the exiter. 
+Don’t forget to free all resources acquired 
+(list of join statuses, list of user locks, list of user semaphores)*/
 void process_exit(void) {
   struct thread* cur = thread_current();
   struct list_elem *e, *next;
@@ -734,6 +740,12 @@ struct thread_exec_info {
   bool success;                         /* Thread successfully loaded? */
 };
 
+//join all the unjoined threads. called by pthread_exit_main
+static void join_all_thread(void);
+
+//release all the locks the thread has, called before join(sema_down)
+static void release_all_locks(void);
+
 /* Sets up threadfunc and void* arg arguments in KPAGE, which will be mapped
    to UPAGE in user space.  Sets *ESP to the initial
    stack pointer for the thread. */
@@ -920,12 +932,12 @@ tid_t pthread_join(tid_t tid) {
 
   for (e = list_begin(&t->pcb->join_statuses); e != list_end(&t->pcb->join_statuses); e = list_next(e)) {
     struct join_status* js = list_entry(e, struct join_status, elem);
-    if (js->tid == tid) {
+    if (js->tid == tid && js->joined==false) {
       // drop all currently held acquired_locks before blocking on the semaphore, this prevents deadlock
-      lock_release(&t->pcb->join_lock);
+      release_all_locks();
       js->joined = true;
-      list_remove(e);   // maybe remove that join_status from the list after we wake up (after sema_down)
       sema_down(&js->dead);
+      list_remove(e);   //remove the join status from the list
       free(js);         // maybe too general, might exist edge cases with freeing ;)
       return tid;
     }
@@ -949,13 +961,16 @@ tid_t pthread_join(tid_t tid) {
    now, it does nothing. */
 void pthread_exit(void) {
   struct thread* t = thread_current();
+  if(t==t->pcb->main_thread)
+    return pthread_exit_main();
+
+  release_all_locks();
 
   /* Free the physical stack page. */
   // uint8_t* page_to_dealloc = pagedir_get_page(t->pcb->pagedir, pg_round_down(t->thread_stack_page));
   /* Remove the mapping from upage to kpage in the kernel. */
-  pagedir_clear_page(t->pcb->pagedir, pg_round_down(t->thread_stack_page));
+  pagedir_clear_page(t->pcb->pagedir, pg_round_down(t->thread_stack_page));//set upage present bit
   palloc_free_page(t->thread_kernel_page);
-
 
   sema_up(&t->join_status->dead);
 
@@ -970,4 +985,51 @@ void pthread_exit(void) {
 
    This function will be implemented in Project 2: Multithreading. For
    now, it does nothing. */
-void pthread_exit_main(void) {}
+void pthread_exit_main(void) {
+  /*pthread_exit_main must first wake any waiters, then join on all unjoined threads.
+   Then, simply call process_exit.*/
+  struct thread* cur = thread_current();
+  ASSERT(cur == cur->pcb->main_thread);
+  //wake up any waiter on main thread
+  sema_up(&cur->join_status->dead);
+  
+  //join on all unjoined threads
+  join_all_thread();
+
+  /*If the main thread calls pthread_exit, the process should terminate with exit code 0*/
+  int exit_code = 0;
+  cur->pcb->wait_status->exit_code = exit_code;
+  process_exit();
+}
+
+//join all the unjoined threads. called by pthread_exit_main
+static void join_all_thread(void){
+  struct thread* t = thread_current();
+  // drop all currently held acquired_locks before blocking on the semaphore, this prevents deadlock
+  release_all_locks();
+
+  lock_acquire(&t->pcb->join_lock);
+  struct list_elem* e;
+  for (e = list_begin(&t->pcb->join_statuses); e != list_end(&t->pcb->join_statuses);
+       e = list_next(e)) {
+    struct join_status* js = list_entry(e, struct join_status, elem);
+    if (js->joined==false) {
+      js->joined = true;
+      list_remove(e); // maybe remove that join_status from the list after we wake up (after sema_down)
+      sema_down(&js->dead);
+      free(js); // maybe too general, might exist edge cases with freeing;
+    }
+  }
+  lock_release(&t->pcb->join_lock);
+}
+
+//release all the locks the thread has, called before join(sema_down)
+static void release_all_locks(void) {
+  struct thread* t = thread_current();
+  struct list_elem* e;
+
+  for (e = list_begin(&t->acquired_locks); e != list_end(&t->acquired_locks);e=list_next(e)){
+    struct lock* lck = list_entry(e, struct lock, lock_elem);
+    lock_release(lck);
+  }
+}
