@@ -168,7 +168,11 @@ int sys_pthread_create(stub_fun sfun, pthread_fun tfun, const void* arg) {
 
 /* Pthread exit system call. */
 int sys_pthread_exit(void) {
-  pthread_exit();
+  struct thread* t = thread_current();
+  if (t == t->pcb->main_thread)
+    pthread_exit_main();
+  else
+    pthread_exit();
 }
 
 /* Pthread join system call. */
