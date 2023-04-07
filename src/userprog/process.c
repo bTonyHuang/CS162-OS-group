@@ -28,6 +28,11 @@ static thread_func start_pthread NO_RETURN;
 static bool load(const char* cmd_line, void (**eip)(void), void** esp);
 bool setup_thread(void (**eip)(void), void** esp);
 
+//join all the unjoined threads. called by pthread_exit_main
+static void join_all_thread(void);
+//release all the locks the thread has, called by pthread_join(sema_down) and process_wait
+static void release_all_locks(void);
+
 /* Data structure shared between process_execute() in the
    invoking thread and start_process() in the newly invoked
    thread. */
@@ -215,6 +220,8 @@ int process_wait(pid_t child_pid) {
   struct thread* cur = thread_current();
   struct list_elem* e;
 
+  release_all_locks();
+
   for (e = list_begin(&cur->pcb->children); e != list_end(&cur->pcb->children); e = list_next(e)) {
     struct wait_status* cs = list_entry(e, struct wait_status, elem);
     if (cs->pid == child_pid) {
@@ -249,6 +256,27 @@ void process_exit(void) {
 
   /* Close executable (and allow writes). */
   safe_file_close(cur->pcb->bin_file);
+
+  /* free list of user locks */
+  for (e = list_begin(&cur->pcb->lds); e != list_end(&cur->pcb->lds); e = next) {
+    struct lock_descriptor* ld = list_entry(e, struct lock_descriptor, elem);
+    next = list_remove(e);
+    free(ld);
+  }
+
+  /* free list of user semas */
+  for (e = list_begin(&cur->pcb->sds); e != list_end(&cur->pcb->sds); e = next) {
+    struct sema_descriptor* sd = list_entry(e, struct sema_descriptor, elem);
+    next = list_remove(e);
+    free(sd);
+  }
+
+  /* free list of join statuses */
+  for (e = list_begin(&cur->pcb->join_statuses); e != list_end(&cur->pcb->join_statuses); e = next) {
+    struct join_status* js = list_entry(e, struct join_status, elem);
+    next = list_remove(e);
+    free(js);
+  }
 
   /* Free entries of children list. */
   for (e = list_begin(&cur->pcb->children); e != list_end(&cur->pcb->children); e = next) {
@@ -739,12 +767,6 @@ struct thread_exec_info {
   struct semaphore load_done;           /* "Up"ed when loading complete. */
   bool success;                         /* Thread successfully loaded? */
 };
-
-//join all the unjoined threads. called by pthread_exit_main
-static void join_all_thread(void);
-
-//release all the locks the thread has, called before join(sema_down)
-static void release_all_locks(void);
 
 /* Sets up threadfunc and void* arg arguments in KPAGE, which will be mapped
    to UPAGE in user space.  Sets *ESP to the initial

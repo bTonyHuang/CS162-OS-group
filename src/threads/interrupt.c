@@ -12,6 +12,7 @@
 #ifdef USERPROG
 #include "userprog/gdt.h"
 #endif
+#include "userprog/process.h"
 
 /* Programmable Interrupt Controller (PIC) registers.
    A PC has two PICs, called the master and slave PICs, with the
