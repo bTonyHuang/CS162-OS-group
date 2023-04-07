@@ -959,8 +959,11 @@ tid_t pthread_join(tid_t tid) {
       release_all_locks();
       js->joined = true;
       sema_down(&js->dead);
-      list_remove(e);   //remove the join status from the list
-      free(js);         // maybe too general, might exist edge cases with freeing ;)
+      //do not remove main thread
+      if(js->tid!=t->pcb->main_thread->tid){
+        list_remove(e); //remove the join status from the list
+        free(js);       // maybe too general, might exist edge cases with freeing ;)
+      }
       return tid;
     }
   }
@@ -1035,7 +1038,7 @@ static void join_all_thread(void){
   for (e = list_begin(&t->pcb->join_statuses); e != list_end(&t->pcb->join_statuses);
        e = list_next(e)) {
     struct join_status* js = list_entry(e, struct join_status, elem);
-    if (js->joined==false) {
+    if (js->joined==false&&js->tid!=t->tid) {
       js->joined = true;
       list_remove(e); // maybe remove that join_status from the list after we wake up (after sema_down)
       sema_down(&js->dead);
