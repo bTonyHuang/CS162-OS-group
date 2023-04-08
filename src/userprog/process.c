@@ -234,7 +234,7 @@ int process_wait(pid_t child_pid) {
   struct thread* cur = thread_current();
   struct list_elem* e;
 
-  release_all_locks();
+  //release_all_locks();
 
   for (e = list_begin(&cur->pcb->children); e != list_end(&cur->pcb->children); e = list_next(e)) {
     struct wait_status* cs = list_entry(e, struct wait_status, elem);
@@ -256,7 +256,12 @@ in a way that ensures that resources are not leaked.
 In the staff solution, this is done by waiting for the thread to trap back to userspace, 
 and directing it to pthread_exit. Don’t forget to wake any joining threads on the exiter. 
 Don’t forget to free all resources acquired 
-(list of join statuses, list of user locks, list of user semaphores)*/
+(list of join statuses, list of user locks, list of user semaphores)
+
+Grading comment:
+process_exit should arrange for one thread to become the designated exiter, 
+have that thread wake its joiners, and wait for all other threads (including concurrent exiters)
+to die before proceeding. This can be done with a CV.*/
 void process_exit(void) {
   struct thread* cur = thread_current();
   struct list_elem *e, *next;
