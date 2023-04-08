@@ -265,6 +265,7 @@ have that thread wake its joiners, and wait for all other threads (including con
 to die before proceeding. This can be done with a CV.*/
 void process_exit(void) {
   struct thread* cur = thread_current();
+
   struct list_elem *e, *next;
   uint32_t* pd;
 
@@ -274,17 +275,19 @@ void process_exit(void) {
     NOT_REACHED();
   }
 
-  /* Close executable (and allow writes). */
-  safe_file_close(cur->pcb->bin_file);
+  /* Kill all other threads. */
+  cur->pcb->time_to_die = true;
 
   /* Wake up any joiner. */
-  sema_up(&cur->join_status->dead);
+  if (!cur->pcb->main_thread->join_status->joined) {
+    sema_up(&cur->join_status->dead);
+  }
 
   /* Join on all other unjoined threads, allowing them to pthread_exit before we free everything. */
   join_all_thread();
 
-  /* Kill all other threads. */
-  cur->pcb->time_to_die = true;
+  /* Close executable (and allow writes). */
+  safe_file_close(cur->pcb->bin_file);
 
   /* free list of user locks */
   for (e = list_begin(&cur->pcb->lds); e != list_end(&cur->pcb->lds); e = next) {
@@ -1045,12 +1048,12 @@ void pthread_exit_main(void) {
    Then, simply call process_exit.*/
   struct thread* cur = thread_current();
   ASSERT(cur == cur->pcb->main_thread);
+
   //wake up any waiter on main thread
   sema_up(&cur->join_status->dead);
 
   //join on all unjoined threads
   join_all_thread();
-
   /*If the main thread calls pthread_exit, the process should terminate with exit code 0*/
   int exit_code = 0;
   cur->pcb->wait_status->exit_code = exit_code;
