@@ -141,6 +141,7 @@ static void start_process(void* exec_) {
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
     list_init(&t->pcb->join_statuses);
     lock_init(&t->pcb->join_lock);
+    t->pcb->time_to_die = false;
   }
 
   /* Allocate wait_status. */
@@ -275,6 +276,15 @@ void process_exit(void) {
 
   /* Close executable (and allow writes). */
   safe_file_close(cur->pcb->bin_file);
+
+  /* Wake up any joiner. */
+  sema_up(&cur->join_status->dead);
+
+  /* Join on all other unjoined threads, allowing them to pthread_exit before we free everything. */
+  join_all_thread();
+
+  /* Kill all other threads. */
+  cur->pcb->time_to_die = true;
 
   /* free list of user locks */
   for (e = list_begin(&cur->pcb->lds); e != list_end(&cur->pcb->lds); e = next) {
