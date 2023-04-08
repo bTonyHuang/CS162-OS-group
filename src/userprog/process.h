@@ -39,7 +39,6 @@ struct process {
 
   struct list join_statuses;       /* Join status nodes of threads available to join on. */
   struct lock join_lock;           /* Process wide lock for accessing the list of join statuses. */
-  // prob wanna make the join_lock a general case thread_operations_lock
 
   /* Owned by syscall.c. */
   struct list fds; /* List of file descriptors. */
@@ -50,6 +49,8 @@ struct process {
 
   struct list sds;
   int next_sema_handle;
+
+  bool time_to_die;
 };
 
 /* Tracks the completion of a thread.
