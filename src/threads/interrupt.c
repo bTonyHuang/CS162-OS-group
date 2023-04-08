@@ -318,6 +318,13 @@ static inline bool is_trap_from_userspace(struct intr_frame* frame) {
    intr-stubs.S.  FRAME describes the interrupt and the
    interrupted thread's registers. */
 void intr_handler(struct intr_frame* frame) {
+  if (is_trap_from_userspace(frame)) {
+    struct thread* t = thread_current();
+    if (t->pcb->time_to_die) {
+      pthread_exit();
+    }
+  }
+
   bool external;
   intr_handler_func* handler;
 
