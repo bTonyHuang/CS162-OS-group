@@ -27,28 +27,35 @@ static inline size_t bytes_to_sectors(off_t size) { return DIV_ROUND_UP(size, BL
 static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
   ASSERT(inode != NULL);
   // https://edstem.org/us/courses/33980/discussion/2905210?comment=6916229 stack memcpy strat, need to change to inplace once buffer cache is introduced
-  struct inode_disk disk_inode;
+  struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
+  if(!disk_inode){
+    return -1;
+  }
   uint8_t buffer[BLOCK_SECTOR_SIZE]; // array of 512 bytes
   block_read(fs_device, inode->sector, &buffer);
-  memcpy(&disk_inode, &buffer, BLOCK_SECTOR_SIZE); // inode_disk with its direct ... pointers, but in memory!
+  memcpy(disk_inode, &buffer, BLOCK_SECTOR_SIZE); // inode_disk with its direct ... pointers, but in memory!
   
-  if (pos < disk_inode.length) {
+  if (pos < disk_inode->length) {
     if (pos < 124 * BLOCK_SECTOR_SIZE) {
       // the position we want to read at is in one of the direct pointers
-      block_sector_t sector_id = disk_inode.directs[pos / BLOCK_SECTOR_SIZE];
+      block_sector_t sector_id = disk_inode->directs[pos / BLOCK_SECTOR_SIZE];
+
+      free(disk_inode);
       return sector_id;
     } else if (pos < 124 * BLOCK_SECTOR_SIZE + BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4) {
       // the position we want to read at has to go through the indirect pointer
       block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
-      block_read(fs_device, disk_inode.indirect, &indirect_pointers);
+      block_read(fs_device, disk_inode->indirect, &indirect_pointers);
       // then find the right pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the indirect references
       off_t indirect_pos = pos - 124 * BLOCK_SECTOR_SIZE; // account for passing the direct pointers
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
+
+      free(disk_inode);
       return sector_id;
     } else {
       // doubly indirect pointer
       block_sector_t dbl_indirect_pointers[BLOCK_SECTOR_SIZE / 4];
-      block_read(fs_device, disk_inode.dbl_indirect, &dbl_indirect_pointers);
+      block_read(fs_device, disk_inode->dbl_indirect, &dbl_indirect_pointers);
       // then find the right indirect pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the dbl indirect references
       off_t new_pos = pos - (124 + BLOCK_SECTOR_SIZE / 4) * BLOCK_SECTOR_SIZE; // account for passing all direct pointers and the indirect pointer
       off_t dbl_index = new_pos / (BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4);
@@ -64,9 +71,12 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
       // alternative: off_t indirect_pos = new_pos % (BLOCK_SECTOR_SIZE / 4 * BLOCK_SECTOR_SIZE); // account for passing over some indirect pointers when indexing into our doubly indirect pointer
 
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
+
+      free(disk_inode);
       return sector_id;
     }
   } else {
+    free(disk_inode);
     return -1;
   }
 }
@@ -150,10 +160,11 @@ struct inode* inode_open(block_sector_t sector) {
 
 /* Reopens and returns INODE. */
 struct inode* inode_reopen(struct inode* inode) {
-  if (inode != NULL)
+  if (inode != NULL){
     lock_acquire(&inode->inode_lock);
     inode->open_cnt++;
     lock_release(&inode->inode_lock);
+  }
   return inode;
 }
 
@@ -179,12 +190,18 @@ void inode_close(struct inode* inode) {
     /* Deallocate blocks if removed. */
     if (inode->removed) {
       // get inode_disk into memory
-      struct inode_disk disk_inode;
-      block_read(fs_device, inode->sector, &disk_inode);
-      inode_resize(&disk_inode, 0);
+      struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
+      if (!disk_inode) {
+        lock_release(&inode->inode_lock);
+        free(inode);
+        return;
+      }
+      block_read(fs_device, inode->sector, disk_inode);
+      inode_resize(disk_inode, 0);
       free_map_release(inode->sector, 1);
       // old freeing of data sectors
       // free_map_release(inode->data.start, bytes_to_sectors(inode->data.length));
+      free(disk_inode);
     }
 
     lock_release(&inode->inode_lock);
@@ -192,7 +209,7 @@ void inode_close(struct inode* inode) {
   } else {
     lock_release(&inode->inode_lock);
   }
-  
+
 }
 
 /* Marks INODE to be deleted when it is closed by the last caller who
@@ -266,13 +283,22 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
 
   lock_acquire(&inode->inode_lock);
   // if inode_disk (file) curr length < offset + size, then we gotta resize (aka expand and allocate), then do the writes
-  if (inode_length(inode) <= offset + size + 1){
-    bool success = inode_resize(inode, size + offset + 1);
+  if (inode_length(inode) < offset + size){
+    // get inode_disk into memory
+    struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
+    if (!disk_inode) {
+      return;
+    }
+    block_read(fs_device, inode->sector, disk_inode);
+    bool success = inode_resize(disk_inode, offset + size);
+    free(disk_inode);
+
     if (!success) {
       lock_release(&inode->inode_lock);
       return 0;
     }
   }
+
   if (inode->deny_write_cnt){
     lock_release(&inode->inode_lock);
     return 0;
@@ -350,9 +376,14 @@ void inode_allow_write(struct inode* inode) {
 off_t inode_length(const struct inode* inode) { 
   if(!inode)
     return 0;
-  struct inode_disk disk_inode;
-  block_read(fs_device, inode->sector, &disk_inode);
-  return disk_inode.length;
+  struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
+  if (!disk_inode) {
+    return 0;
+  }
+  block_read(fs_device, inode->sector, disk_inode);
+  off_t length = disk_inode->length;
+  free(disk_inode);
+  return length;
 }
 
 /* Grabs a new sector using free_map_allocate, and if successful, zeroes it out as well. */
@@ -388,6 +419,12 @@ bool inode_resize(struct inode_disk* id, off_t size) {
       }
       id->directs[i] = sector;
     }
+  }
+
+  //edge case for free map first allocate
+  if (id->length <= DIRECTS_SIZE*BLOCK_SECTOR_SIZE && size <= DIRECTS_SIZE*BLOCK_SECTOR_SIZE){
+    id->length = size;
+    return true;
   }
 
   //check indirect pointer
