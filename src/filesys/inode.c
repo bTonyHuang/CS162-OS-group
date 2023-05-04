@@ -201,6 +201,7 @@ void inode_remove(struct inode* inode) {
   ASSERT(inode != NULL);
   lock_acquire(&inode->inode_lock);
   inode->removed = true;
+  lock_release(&inode->inode_lock);
 }
 
 /* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.
@@ -211,6 +212,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
   off_t bytes_read = 0;
   uint8_t* bounce = NULL;
 
+  lock_acquire(&inode->inode_lock);
   while (size > 0) {
     /* Disk sector to read, starting byte offset within sector. */
     block_sector_t sector_idx = byte_to_sector(inode, offset);
@@ -247,6 +249,7 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
     bytes_read += chunk_size;
   }
   free(bounce);
+  lock_release(&inode->inode_lock);
 
   return bytes_read;
 }
@@ -261,13 +264,19 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
   off_t bytes_written = 0;
   uint8_t* bounce = NULL;
 
-
+  lock_acquire(&inode->inode_lock);
   // if inode_disk (file) curr length < offset + size, then we gotta resize (aka expand and allocate), then do the writes
-  // if the above inode_resize failed, that means that the current state of inode_disk may contain 
-  // leftover allocated blocks / pointers from the resize attempt
-  // then just call inode_resize(original size) to clean up those leftovers
-  if (inode->deny_write_cnt)
+  if (inode_length(inode) <= offset + size + 1){
+    bool success = inode_resize(inode, size + offset + 1);
+    if (!success) {
+      lock_release(&inode->inode_lock);
+      return 0;
+    }
+  }
+  if (inode->deny_write_cnt){
+    lock_release(&inode->inode_lock);
     return 0;
+  }
 
   while (size > 0) {
     /* Sector to write, starting byte offset within sector. */
@@ -313,6 +322,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
   }
   free(bounce);
 
+  lock_release(&inode->inode_lock);
   return bytes_written;
 }
 
