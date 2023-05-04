@@ -1,5 +1,4 @@
 #include "filesys/inode.h"
-#include <list.h>
 #include <debug.h>
 #include <round.h>
 #include <string.h>
@@ -7,35 +6,11 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
-/* Identifies an inode. */
-#define INODE_MAGIC 0x494e4f44
-
-#define DIRECTS_SIZE 124
-
-#define INDIRECT_SIZE 128
-
-/* On-disk inode.
-   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
-struct inode_disk {
-  block_sector_t directs[124];  /* Array of 124 direct pointers. */
-  block_sector_t indirect;      /* Singly indirect pointer. */
-  block_sector_t dbl_indirect;  /* Doublely-indirect pointer. */
-  off_t length;         /* File size in bytes. */
-  unsigned magic;       /* Magic number. */
-};
 
 /* Returns the number of sectors to allocate for an inode SIZE
    bytes long. */
 static inline size_t bytes_to_sectors(off_t size) { return DIV_ROUND_UP(size, BLOCK_SECTOR_SIZE); }
 
-/* In-memory inode. */
-struct inode {
-  struct list_elem elem;  /* Element in inode list. */
-  block_sector_t sector;  /* Sector number of disk location. */
-  int open_cnt;           /* Number of openers. */
-  bool removed;           /* True if deleted, false otherwise. */
-  int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
-};
 
 /* Returns the block device sector that contains byte offset POS
    within INODE.
@@ -65,7 +40,7 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
     } else if (pos < 124 * BLOCK_SECTOR_SIZE + BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4) {
       // the position we want to read at has to go through the indirect pointer
       block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
-      block_read(fs_device, &disk_inode->indirect, &indirect_pointers);
+      block_read(fs_device, disk_inode.indirect, &indirect_pointers);
       // then find the right pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the indirect references
       off_t indirect_pos = pos - 124 * BLOCK_SECTOR_SIZE; // account for passing the direct pointers
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
@@ -73,7 +48,7 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
     } else {
       // doubly indirect pointer
       block_sector_t dbl_indirect_pointers[BLOCK_SECTOR_SIZE / 4];
-      block_read(fs_device, &disk_inode->dbl_indirect, &dbl_indirect_pointers);
+      block_read(fs_device, disk_inode.dbl_indirect, &dbl_indirect_pointers);
       // then find the right indirect pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the dbl indirect references
       off_t new_pos = pos - (124 + BLOCK_SECTOR_SIZE / 4) * BLOCK_SECTOR_SIZE; // account for passing all direct pointers and the indirect pointer
       off_t dbl_index = new_pos / (BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4);
@@ -164,7 +139,8 @@ struct inode* inode_open(block_sector_t sector) {
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  block_read(fs_device, inode->sector, &inode->data);
+  lock_init(&inode->inode_lock);
+  block_read(fs_device, inode->sector, &inode->sector);
   return inode;
 }
 
@@ -333,7 +309,13 @@ void inode_allow_write(struct inode* inode) {
 }
 
 /* Returns the length, in bytes, of INODE's data. */
-off_t inode_length(const struct inode* inode) { return inode->data.length; }
+off_t inode_length(const struct inode* inode) { 
+  if(!inode)
+    return 0;
+  struct inode_disk disk_inode;
+  block_read(fs_device, inode->sector, &disk_inode);
+  return disk_inode.length;
+}
 
 /*resize the inode, check direct pointers, indirect and double indirect pointer
   syncronization needed - need to hold the inode lock*/
@@ -367,7 +349,7 @@ bool inode_resize(struct inode_disk* id, off_t size) {
   }
 
   //check double indirect pointer
-  success = indirect_dbl_block_check(&id->dbl_indirect, 
+  success = dbl_indirect_block_check(&id->dbl_indirect, 
                                     size - (DIRECTS_SIZE + INDIRECT_SIZE) * BLOCK_SECTOR_SIZE);
   if(!success) {
     inode_resize(id, id->length);
@@ -478,7 +460,7 @@ bool dbl_indirect_block_check(block_sector_t* dbl_indirect, off_t size) {
         return false;
       }
       dbl_indirect_block[i] = sector;
-      indirect_block_check(dbl_indirect_block[i], size - i * INDIRECT_SIZE * BLOCK_SECTOR_SIZE);
+      indirect_block_check(&dbl_indirect_block[i], size - i * INDIRECT_SIZE * BLOCK_SECTOR_SIZE);
     }
   }
 
