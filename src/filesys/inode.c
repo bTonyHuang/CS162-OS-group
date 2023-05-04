@@ -10,6 +10,10 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
+#define DIRECTS_SIZE 124
+
+#define INDIRECT_SIZE 128
+
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk {
@@ -330,3 +334,51 @@ void inode_allow_write(struct inode* inode) {
 
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length(const struct inode* inode) { return inode->data.length; }
+
+bool inode_resize(struct inode_disk* id, off_t size) {
+  block_sector_t sector;
+  /* Handle direct pointers. */
+  for (int i = 0; i < DIRECTS_SIZE; i++) {
+    if (size <= BLOCK_SECTOR_SIZE * i && id->directs[i] != 0) {
+      /* Shrink. */
+      //block_free(id->directs[i]);
+      id->directs[i] = 0;
+    } else if (size > BLOCK_SECTOR_SIZE * i && id->directs[i] == 0) {
+      /* Grow. */
+      //id->directs[i] = block_allocate();
+    }
+  }
+
+  /* Handle indirect pointers. */
+  block_sector_t buffer[INDIRECT_SIZE];
+  memset(buffer, 0, 512);
+  if (id->indirect == 0) {
+    /* Allocate indirect block. */
+    //id->indirect = block_allocate();
+  } else {
+    /* Read in indirect block. */
+    block_read(fs_device, id->indirect, buffer);
+  }
+  /* Handle indirect pointers. */
+  for (int i = 0; i < INDIRECT_SIZE; i++) {
+    if (size <= (DIRECTS_SIZE + i) * BLOCK_SECTOR_SIZE && buffer[i] != 0) {
+      /* Shrink. */
+      //block_free(buffer[i]);
+      buffer[i] = 0;
+    } else if (size > (DIRECTS_SIZE + i) * BLOCK_SECTOR_SIZE && buffer[i] == 0) {
+      /* Grow. */
+      //buffer[i] = block_allocate();
+    }
+  }
+  if (size <= DIRECTS_SIZE * BLOCK_SECTOR_SIZE) {
+    /* We shrank the inode such that indirect pointers are not required. */
+    //block_free(id->indirect);
+    id->indirect = 0;
+  } else {
+    /* Write the updates to the indirect block back to disk. */
+    block_write(fs_device, id->indirect, buffer);
+  }
+
+  id->length = size;
+  return true;
+}
