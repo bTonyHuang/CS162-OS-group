@@ -13,10 +13,11 @@
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk {
-  block_sector_t start; /* First data sector. */
+  block_sector_t directs[124];  /* Array of 124 direct pointers. */
+  block_sector_t indirect;      /* Singly indirect pointer. */
+  block_sector_t dbl_indirect;  /* Doublely-indirect pointer. */
   off_t length;         /* File size in bytes. */
   unsigned magic;       /* Magic number. */
-  uint32_t unused[125]; /* Not used. */
 };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -30,19 +31,63 @@ struct inode {
   int open_cnt;           /* Number of openers. */
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
-  struct inode_disk data; /* Inode content. */
 };
 
 /* Returns the block device sector that contains byte offset POS
    within INODE.
    Returns -1 if INODE does not contain data for a byte at offset
    POS. */
+// static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
+//   ASSERT(inode != NULL);
+//   if (pos < inode->data.length)
+//     return inode->data.start + pos / BLOCK_SECTOR_SIZE;
+//   else
+//     return -1;
+// }
+
 static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
   ASSERT(inode != NULL);
-  if (pos < inode->data.length)
-    return inode->data.start + pos / BLOCK_SECTOR_SIZE;
-  else
+  // https://edstem.org/us/courses/33980/discussion/2905210?comment=6916229 stack memcpy strat, need to change to inplace once buffer cache is introduced
+  struct inode_disk disk_inode;
+  uint8_t buffer[BLOCK_SECTOR_SIZE]; // array of 512 bytes
+  block_read(fs_device, inode->sector, &buffer);
+  memcpy(&disk_inode, &buffer, BLOCK_SECTOR_SIZE); // inode_disk with its direct ... pointers, but in memory!
+  
+  if (pos < disk_inode.length) {
+    if (pos < 124 * BLOCK_SECTOR_SIZE) {
+      // the position we want to read at is in one of the direct pointers
+      block_sector_t sector_id = disk_inode.directs[pos / BLOCK_SECTOR_SIZE];
+      return sector_id;
+    } else if (pos < 124 * BLOCK_SECTOR_SIZE + BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4) {
+      // the position we want to read at has to go through the indirect pointer
+      block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
+      block_read(fs_device, &disk_inode->indirect, &indirect_pointers);
+      // then find the right pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the indirect references
+      off_t indirect_pos = pos - 124 * BLOCK_SECTOR_SIZE; // account for passing the direct pointers
+      block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
+      return sector_id;
+    } else {
+      // doubly indirect pointer
+      block_sector_t dbl_indirect_pointers[BLOCK_SECTOR_SIZE / 4];
+      block_read(fs_device, &disk_inode->dbl_indirect, &dbl_indirect_pointers);
+      // then find the right indirect pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the dbl indirect references
+      off_t new_pos = pos - (124 + BLOCK_SECTOR_SIZE / 4) * BLOCK_SECTOR_SIZE; // account for passing all direct pointers and the indirect pointer
+      off_t dbl_index = new_pos / (BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4);
+      
+      block_sector_t indirect_id = dbl_indirect_pointers[dbl_index];
+
+      // read the indirect pointer we identified
+      block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
+      block_read(fs_device, indirect_id, &indirect_pointers);
+      
+      off_t indirect_pos = new_pos - dbl_index * BLOCK_SECTOR_SIZE; // account for passing over some indirect pointers when indexing into our doubly indirect pointer
+
+      block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
+      return sector_id;
+    }
+  } else {
     return -1;
+  }
 }
 
 /* List of open inodes, so that opening a single inode twice
