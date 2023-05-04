@@ -151,9 +151,9 @@ struct inode* inode_open(block_sector_t sector) {
 /* Reopens and returns INODE. */
 struct inode* inode_reopen(struct inode* inode) {
   if (inode != NULL)
-    lock_acquire(inode->inode_lock);
+    lock_acquire(&inode->inode_lock);
     inode->open_cnt++;
-    lock_release(inode->inode_lock);
+    lock_release(&inode->inode_lock);
   return inode;
 }
 
@@ -169,7 +169,7 @@ void inode_close(struct inode* inode) {
     return;
 
   /* Release resources if this was the last opener. */
-  lock_acquire(inode->inode_lock);
+  lock_acquire(&inode->inode_lock);
   if (--inode->open_cnt == 0) {
     /* Remove from inode list and release lock. */
     lock_acquire(&open_inodes_lock);
@@ -179,16 +179,18 @@ void inode_close(struct inode* inode) {
     /* Deallocate blocks if removed. */
     if (inode->removed) {
       // get inode_disk into memory
-      inode_resize()
+      struct inode_disk disk_inode;
+      block_read(fs_device, inode->sector, &disk_inode);
+      inode_resize(&disk_inode, 0);
       free_map_release(inode->sector, 1);
       // old freeing of data sectors
       // free_map_release(inode->data.start, bytes_to_sectors(inode->data.length));
     }
 
-    lock_release(inode->inode_lock);
+    lock_release(&inode->inode_lock);
     free(inode);
   } else {
-    lock_release(inode->inode_lock);
+    lock_release(&inode->inode_lock);
   }
   
 }
@@ -197,6 +199,7 @@ void inode_close(struct inode* inode) {
    has it open. */
 void inode_remove(struct inode* inode) {
   ASSERT(inode != NULL);
+  lock_acquire(&inode->inode_lock);
   inode->removed = true;
 }
 
