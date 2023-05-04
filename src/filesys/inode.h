@@ -20,4 +20,8 @@ void inode_deny_write(struct inode*);
 void inode_allow_write(struct inode*);
 off_t inode_length(const struct inode*);
 
+bool inode_resize(struct inode_disk* id, off_t size);
+bool indirect_block_check(block_sector_t* indirect, off_t size);
+bool dbl_indirect_block_check(block_sector_t* dbl_indirect, off_t size);
+
 #endif /* filesys/inode.h */
