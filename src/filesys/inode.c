@@ -10,6 +10,10 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
+#define DIRECTS_SIZE 124
+
+#define INDIRECT_SIZE 128
+
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk {
@@ -336,3 +340,94 @@ void inode_allow_write(struct inode* inode) {
 
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length(const struct inode* inode) { return inode->data.length; }
+
+bool inode_resize(struct inode_disk* id, off_t size) {
+  block_sector_t sector;
+  /* Handle direct pointers. */
+  for (int i = 0; i < DIRECTS_SIZE; i++) {
+    if (size <= BLOCK_SECTOR_SIZE * i && id->directs[i] != 0) {
+      /* Shrink. */
+      //block_free(id->directs[i]);
+      id->directs[i] = 0;
+    } else if (size > BLOCK_SECTOR_SIZE * i && id->directs[i] == 0) {
+      /* Grow. */
+      //id->directs[i] = block_allocate();
+    }
+  }
+
+  //sanity check needed (check the bool for allocate)
+  indirect_block_write(id->indirect, size - DIRECTS_SIZE * BLOCK_SECTOR_SIZE);
+
+  /* Get double indirect pointers*/
+  block_sector_t dbl_indirect_block[INDIRECT_SIZE];
+  memset(dbl_indirect_block, 0, 512);
+  if (id->dbl_indirect == 0) {
+    /* Allocate indirect block. */
+    //id->dbl_indirect = block_allocate();
+  } else {
+    /* Read in indirect block. */
+    block_read(fs_device, id->dbl_indirect, dbl_indirect_block);
+  }
+
+  /* Handle double indirect pointers. */
+  for (int j = 0; j < INDIRECT_SIZE; j++){
+    /* Shrink. */
+    if (size <= (DIRECTS_SIZE + INDIRECT_SIZE + j) * BLOCK_SECTOR_SIZE && dbl_indirect_block[j] != 0) {
+      //indirect_block_free(dbl_indirect_block[j]);
+      dbl_indirect_block[j] = 0;
+    } else if (size > (DIRECTS_SIZE + INDIRECT_SIZE + j) * BLOCK_SECTOR_SIZE && dbl_indirect_block[j] == 0) {
+      /* Grow. */
+      //dbl_indirect_block[j] = block_allocate();
+      indirect_block_write(dbl_indirect_block[j],
+                           size - (DIRECTS_SIZE + INDIRECT_SIZE + j) * BLOCK_SECTOR_SIZE);
+    }
+  }
+
+  /* We shrank the inode such that dbl_indirect pointers are not required. */
+  if (size <= (DIRECTS_SIZE + INDIRECT_SIZE) * BLOCK_SECTOR_SIZE) {
+    //block_free(id->dbl_indirect);
+    id->dbl_indirect = 0;
+  }
+  /* Write the updates to the dbl_indirect block back to disk. */
+  else {
+    block_write(fs_device, id->dbl_indirect, dbl_indirect_block);
+  }
+
+  id->length = size;
+  return true;
+}
+
+bool indirect_block_write(block_sector_t indirect, off_t size) {
+  /* Get indirect pointer block. */
+  block_sector_t indirect_block[INDIRECT_SIZE];
+  memset(indirect_block, 0, 512);
+  if (indirect == 0) {
+    /* Allocate indirect block. */
+    //indirect = block_allocate();
+  } else {
+    /* Read in indirect block. */
+    block_read(fs_device, indirect, indirect_block);
+  }
+
+  /* Handle indirect pointers. */
+  for (int i = 0; i < INDIRECT_SIZE; i++) {
+    if (size <= i * BLOCK_SECTOR_SIZE && indirect_block[i] != 0) {
+      /* Shrink. */
+      //block_free(indirect_block[i]);
+      indirect_block[i] = 0;
+    } else if (size > i * BLOCK_SECTOR_SIZE && indirect_block[i] == 0) {
+      /* Grow. */
+      //indirect_block[i] = block_allocate();
+    }
+  }
+
+  /* We shrank the inode such that indirect pointers are not required. */
+  if (size <= 0) {
+    //block_free(id->indirect);
+    indirect = 0;
+  }
+  /* Write the updates to the indirect block back to disk. */
+  else {
+    block_write(fs_device, indirect, indirect_block);
+  }
+}
