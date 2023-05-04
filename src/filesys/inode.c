@@ -329,7 +329,9 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
 /* Disables writes to INODE.
    May be called at most once per inode opener. */
 void inode_deny_write(struct inode* inode) {
+  lock_acquire(&inode->inode_lock);
   inode->deny_write_cnt++;
+  lock_release(&inode->inode_lock);
   ASSERT(inode->deny_write_cnt <= inode->open_cnt);
 }
 
@@ -339,7 +341,9 @@ void inode_deny_write(struct inode* inode) {
 void inode_allow_write(struct inode* inode) {
   ASSERT(inode->deny_write_cnt > 0);
   ASSERT(inode->deny_write_cnt <= inode->open_cnt);
+  lock_acquire(&inode->inode_lock);
   inode->deny_write_cnt--;
+  lock_release(&inode->inode_lock);
 }
 
 /* Returns the length, in bytes, of INODE's data. */
