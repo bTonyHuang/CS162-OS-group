@@ -34,6 +34,8 @@ struct process {
   struct file* bin_file;           /* Executable. */
   struct thread* main_thread;      /* Pointer to main thread */
 
+  struct dir* cwd;  /*current working directory*/
+
   /* Owned by syscall.c. */
   struct list fds; /* List of file descriptors. */
   int next_handle; /* Next handle value. */
@@ -57,7 +59,9 @@ struct wait_status {
 struct file_descriptor {
   struct list_elem elem; /* List element. */
   struct file* file;     /* File. */
-  int handle;            /* File handle. */
+  struct dir* dir;       /* Dir */
+  bool is_dir;           /* is dir or file*/
+  int handle; /* File handle. */
 };
 
 void userprog_init(void);
