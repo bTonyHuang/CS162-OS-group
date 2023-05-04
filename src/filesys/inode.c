@@ -429,6 +429,20 @@ bool indirect_block_check(block_sector_t* indirect, off_t size) {
   return true;
 }
 
+static void indirect_block_free(block_sector_t indirect) {
+  /* Get double indirect pointer block*/
+  block_sector_t indirect_block[INDIRECT_SIZE];
+  memset(indirect_block, 0, 512);
+  /* Read in indirect block. */
+  block_read(fs_device, indirect, indirect_block);
+  for (int i = 0; i < INDIRECT_SIZE; i++) {
+    if(indirect_block[i] != 0){
+      block_free(indirect_block[i]);
+    }
+  }
+  return;
+}
+
 /*helper function: check double indirect block, pass in pointer*/
 bool dbl_indirect_block_check(block_sector_t* dbl_indirect, off_t size) {
   //temp variable for error check
