@@ -80,7 +80,9 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
       block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
       block_read(fs_device, indirect_id, &indirect_pointers);
       
-      off_t indirect_pos = new_pos - dbl_index * BLOCK_SECTOR_SIZE; // account for passing over some indirect pointers when indexing into our doubly indirect pointer
+      // 0 - 127 * 512
+      off_t indirect_pos = new_pos - dbl_index * BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4;
+      // alternative: off_t indirect_pos = new_pos % (BLOCK_SECTOR_SIZE / 4 * BLOCK_SECTOR_SIZE); // account for passing over some indirect pointers when indexing into our doubly indirect pointer
 
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
       return sector_id;
@@ -262,6 +264,10 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
   off_t bytes_written = 0;
   uint8_t* bounce = NULL;
 
+  // if inode_disk (file) curr length < offset + size, then we gotta resize (aka expand and allocate), then do the writes
+  // if the above inode_resize failed, that means that the current state of inode_disk may contain 
+  // leftover allocated blocks / pointers from the resize attempt
+  // then just call inode_resize(original size) to clean up those leftovers
   if (inode->deny_write_cnt)
     return 0;
 
