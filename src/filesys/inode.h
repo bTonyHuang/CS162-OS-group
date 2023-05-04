@@ -33,7 +33,7 @@ struct inode {
   int open_cnt;           /* Number of openers. */
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
-  struct lock inode_lock; /* syncronization for inode resize*/
+  struct lock inode_lock; /* Synnchronization for concurrent inode resize and inode read, as well as deny_write concurrency. */
 };
 
 void inode_init(void);
