@@ -35,6 +35,7 @@ bool dir_create(block_sector_t sector, size_t entry_cnt) {
     /* Root is its own parent. */
     parent_entry_success = dir_add(new_dir, "..", ROOT_DIR_SECTOR);
   } else {
+    struct thread* t = thread_current();
     struct inode* cwd_inode = dir_get_inode(t->pcb->cwd);
     block_sector_t cwd_sector = cwd_inode->sector;
 
@@ -160,7 +161,7 @@ static int get_next_part(char part[NAME_MAX + 1], const char** srcp) {
 }
 
 /* Takes in an absolute or relative path string, returns the container dir*, and stores the last item (dir or file) into filename. */
-static struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
+struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
   /* Empty path. */
   if (path[0] == '\0') {
     return false;
@@ -180,6 +181,9 @@ static struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
     cur_inode = inode_open(ROOT_DIR_SECTOR);
   } else {
     cur_inode = inode_reopen(thread_current()->pcb->cwd);
+  }
+  if (cur_inode == NULL) {
+    cur_inode = inode_open(ROOT_DIR_SECTOR);
   }
   last_inode = cur_inode;
 

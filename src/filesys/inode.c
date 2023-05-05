@@ -100,6 +100,7 @@ void inode_init(void) {
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
+  uint8_t unused[3];
   struct inode_disk* disk_inode = NULL;
   bool success = false;
 

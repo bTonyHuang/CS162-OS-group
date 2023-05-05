@@ -6,6 +6,7 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "userprog/process.h"
 
 /* Partition that contains the file system. */
 struct block* fs_device;
@@ -92,7 +93,19 @@ void filesys_done(void) { free_map_close(); }
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
-bool filesys_create(const char* name, off_t initial_size, bool is_dir) {
+bool filesys_create(const char* name, off_t initial_size) {
+  block_sector_t inode_sector = 0;
+  struct dir* dir = dir_open_root();
+  bool success = (dir != NULL && free_map_allocate(1, &inode_sector) &&
+                  inode_create(inode_sector, initial_size, false) && dir_add(dir, name, inode_sector));
+  if (!success && inode_sector != 0)
+    free_map_release(inode_sector, 1);
+  dir_close(dir);
+
+  return success;
+}
+
+bool sys_file_create(const char* name, off_t initial_size, bool is_dir) {
   block_sector_t inode_sector = 0;
   char filename[NAME_MAX + 1];
   struct dir* container_dir = resolve(name, filename);
@@ -107,10 +120,10 @@ bool filesys_create(const char* name, off_t initial_size, bool is_dir) {
   /* Two cases for "file" creation, create and mkdir. */
   if (is_dir) {
     success = (dir_create(inode_sector, initial_size + 2) &&
-               dir_add(container_dir, name, inode_sector, is_dir));
+               dir_add(container_dir, name, inode_sector));
   } else {
     success = (inode_create(inode_sector, initial_size, is_dir) &&
-               dir_add(container_dir, name, inode_sector, is_dir));
+               dir_add(container_dir, name, inode_sector));
   }
   dir_close(container_dir);
 
@@ -138,6 +151,22 @@ struct file* filesys_open(const char* name) {
   return file_open(inode);
 }
 
+struct dir* filesys_dir_open(const char* name) {
+  char filename[NAME_MAX + 1];
+  struct dir* container_dir = resolve(name, filename);
+  if (container_dir == NULL) {
+    return NULL;
+  }
+  struct inode* inode;
+  bool inode_exists = dir_lookup(container_dir, filename, &inode);
+  dir_close(container_dir);
+  if (!inode_exists) {
+    return NULL;
+  }
+
+  return dir_reopen(inode);
+}
+
 /* Deletes the file named NAME.
    Returns true if successful, false on failure.
    Fails if no file named NAME exists,
@@ -157,7 +186,7 @@ bool filesys_remove(const char* name) {
 
 /* Changes the current working directory of the current thread to the directory located at PATH.
   Returns true is successful, false otherwise. */
-bool filesys_chdir (const char *path) {
+bool filesys_chdir(const char *path) {
   struct thread *t = thread_current();
   char filename[NAME_MAX + 1];
 
@@ -185,6 +214,11 @@ bool filesys_chdir (const char *path) {
 /* Returns the inumber aka sector id corresponding to a file. */
 uint32_t file_inumber(struct file *file) {
   return file->inode->sector;
+}
+
+/* Returns the inumber aka sector id corresponding to a directory. */
+uint32_t dir_inumber(struct dir *dir) {
+  return dir->inode->sector;
 }
 
 /* User syscall for checking if a file refers to a directory. */
