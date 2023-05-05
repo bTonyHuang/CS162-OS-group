@@ -5,12 +5,43 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
+#include "userprog/process.h"
 
 
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
-bool dir_create(block_sector_t sector, size_t entry_cnt) {
-  return inode_create(sector, entry_cnt * sizeof(struct dir_entry));
+bool dir_create(block_sector_t sector, size_t entry_cnt, block_sector_t parent_sector) {
+  bool inode_success = inode_create(sector, (entry_cnt + 2) * sizeof(struct dir_entry));
+  return inode_success;
+  // if (!inode_success) {
+  //   return false;
+  // }
+
+  // /* Might need null checks here. */
+  // struct inode* dir_inode = inode_open(sector);
+  // struct dir* new_dir = dir_open(dir_inode);
+
+  // bool cur_entry_success = dir_add(new_dir, ".", sector);
+
+  // if (cur_entry_success) {
+  //   dir_close(new_dir);
+  //   return false;
+  // }
+
+  // bool parent_entry_success;
+  // if (sector == ROOT_DIR_SECTOR) {
+  //   parent_entry_success = dir_add(new_dir, "..", sector);
+  // } else {
+  //   parent_entry_success = dir_add(new_dir, "..", parent_sector);
+  // }
+
+  // if (!parent_entry_success) {
+  //   dir_close(new_dir);
+  //   return false;
+  // }
+
+  // dir_close(new_dir);
+  // return true;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -92,6 +123,72 @@ bool dir_lookup(const struct dir* dir, const char* name, struct inode** inode) {
     *inode = NULL;
 
   return *inode != NULL;
+}
+
+/* Extracts a file name part from *SRCP into PART, and updates *SRCP so that the
+   next call will return the next file name part. Returns 1 if successful, 0 at
+   end of string, -1 for a too-long file name part. */
+static int get_next_part(char part[NAME_MAX + 1], const char** srcp) {
+  const char* src = *srcp;
+  char* dst = part;
+
+  /* Skip leading slashes.  If it's all slashes, we're done. */
+  while (*src == '/')
+    src++;
+  if (*src == '\0')
+    return 0;
+
+  /* Copy up to NAME_MAX character from SRC to DST.  Add null terminator. */
+  while (*src != '/' && *src != '\0') {
+    if (dst < part + NAME_MAX)
+      *dst++ = *src;
+    else
+      return -1;
+    src++;
+  }
+  *dst = '\0';
+
+  /* Advance source pointer. */
+  *srcp = src;
+  return 1;
+}
+
+/* Takes in an absolute or relative path string, and returns the corresponding dir*. */
+static struct dir* resolve(const char* path) {
+  struct dir* cur_dir;
+  /* Absolute directory. */
+  if (path[0] == '/') {
+    cur_dir = dir_open_root();
+  } else {
+    cur_dir = thread_current()->pcb->cwd;
+  }
+
+  char* path_copy = calloc(1, strlen(path) + 1);
+  if (path_copy == NULL) {
+    process_exit();
+    NOT_REACHED();
+  }
+  strlcpy(path_copy, path, strlen(path) + 1);
+  char part[NAME_MAX + 1];
+  int part_valid = get_next_part(part, &path_copy);
+  while (part_valid != 0) {
+    if (part_valid == -1) {
+      /* Wee oo wee oo file name part is too long you are under arrest. */
+      process_exit();
+      NOT_REACHED();
+    }
+
+    struct inode* cur_inode;
+    bool dir_found = dir_lookup(cur_dir, part, &cur_inode);
+    if (!dir_found) {
+      return NULL;
+    }
+    dir_close(cur_dir);
+    cur_dir = dir_open(cur_inode);
+  }
+
+  free(path_copy);
+  return cur_dir;
 }
 
 /* Adds a file named NAME to DIR, which must not already contain a

@@ -35,6 +35,7 @@ struct exec_info {
   struct semaphore load_done;      /* "Up"ed when loading complete. */
   struct wait_status* wait_status; /* Child process. */
   bool success;                    /* Program successfully loaded? */
+  struct dir* cwd;                 /* Cwd to inherit from parent to child. */
 };
 
 /* Initializes user programs in the system by ensuring the main
@@ -74,6 +75,11 @@ pid_t process_execute(const char* file_name) {
   /* Initialize exec_info. */
   exec.file_name = file_name;
   sema_init(&exec.load_done, 0);
+  if (exec.cwd == NULL) {
+    exec.cwd = dir_open_root();
+  } else {
+    exec.cwd = thread_current()->pcb->cwd;
+  }  
 
   /* Create a new thread to execute FILE_NAME. */
   strlcpy(thread_name, file_name, sizeof thread_name);
@@ -117,6 +123,7 @@ static void start_process(void* exec_) {
     t->pcb->next_handle = 2;
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
+    t->pcb->cwd = exec->cwd;
   }
 
   /* Allocate wait_status. */
