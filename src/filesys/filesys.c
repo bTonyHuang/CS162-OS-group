@@ -80,6 +80,22 @@ struct file* filesys_open(const char* name) {
   return file_open(inode);
 }
 
+struct dir* filesys_dir_open(const char* name) {
+  char filename[NAME_MAX + 1];
+  struct dir* container_dir = resolve(name, filename);
+  if (container_dir == NULL) {
+    return NULL;
+  }
+  struct inode* inode;
+  bool inode_exists = dir_lookup(container_dir, filename, &inode);
+  dir_close(container_dir);
+  if (!inode_exists) {
+    return NULL;
+  }
+
+  return dir_reopen(inode);
+}
+
 /* Deletes the file named NAME.
    Returns true if successful, false on failure.
    Fails if no file named NAME exists,
@@ -99,7 +115,7 @@ bool filesys_remove(const char* name) {
 
 /* Changes the current working directory of the current thread to the directory located at PATH.
   Returns true is successful, false otherwise. */
-bool filesys_chdir (const char *path) {
+bool filesys_chdir(const char *path) {
   struct thread *t = thread_current();
   char filename[NAME_MAX + 1];
 
@@ -127,6 +143,11 @@ bool filesys_chdir (const char *path) {
 /* Returns the inumber aka sector id corresponding to a file. */
 uint32_t file_inumber(struct file *file) {
   return file->inode->sector;
+}
+
+/* Returns the inumber aka sector id corresponding to a directory. */
+uint32_t dir_inumber(struct dir *dir) {
+  return dir->inode->sector;
 }
 
 /* User syscall for checking if a file refers to a directory. */

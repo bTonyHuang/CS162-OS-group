@@ -16,9 +16,10 @@
 #include "userprog/process.h"
 #include "userprog/pagedir.h"
 
+#define READDIR_MAX_LEN 14
+
 static void syscall_handler(struct intr_frame*);
 static void copy_in(void*, const void*, size_t);
-
 
 void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
@@ -51,6 +52,23 @@ static void syscall_handler(struct intr_frame* f) {
       {1, (syscall_function*)sys_close},
       {1, (syscall_function*)sys_practice},
       {1, (syscall_function*)sys_compute_e},
+      {3, (syscall_function*)sys_pthread_create},
+      {0, (syscall_function*)sys_pthread_exit},
+      {1, (syscall_function*)sys_pthread_join},
+      {1, (syscall_function*)sys_lock_init},
+      {1, (syscall_function*)sys_lock_acquire},
+      {1, (syscall_function*)sys_lock_release},
+      {2, (syscall_function*)sys_sema_init},
+      {1, (syscall_function*)sys_sema_down},
+      {1, (syscall_function*)sys_sema_up},
+      {0, (syscall_function*)sys_get_tid},
+      {2, (syscall_function*)sys_mmap},
+      {1, (syscall_function*)sys_munmap},
+      {1, (syscall_function*)sys_chdir},
+      {1, (syscall_function*)sys_mkdir},
+      {2, (syscall_function*)sys_readdir},
+      {1, (syscall_function*)sys_isdir},
+      {1, (syscall_function*)sys_inumber},
   };
 
   const struct syscall* sc;
@@ -165,14 +183,18 @@ bool readdir(int fd, char name[READDIR_MAX_LEN + 1]) {
 bool isdir(int handle) {
   struct file_descriptor* fd;
   fd = lookup_fd(handle);
-  return file_is_dir(struct file *file);
+  return fd->is_dir;
 }
 
 /* Inumber system call. */
 int inumber(int handle) {
   struct file_descriptor* fd;
   fd = lookup_fd(handle);
-  return file_inumber(struct file *file);
+  if (fd->is_dir) {
+    return dir_inumber(fd->file);
+  } else {
+    return file_inumber(fd->file);
+  }
 }
 
 /* Halt system call. */
@@ -232,6 +254,21 @@ int sys_open(const char* ufile) {
 
   fd = malloc(sizeof *fd);
   if (fd != NULL) {
+    /* for some file path /a/b/c/d/, this logic grabs the inode corresponding to entry d. */
+    char filename[NAME_MAX + 1];
+    struct dir* container_dir = resolve(kfile, filename);
+    if (container_dir == NULL) {
+      return NULL;
+    }
+    struct inode* inode;
+    bool inode_exists = dir_lookup(container_dir, filename, &inode);
+    dir_close(container_dir);
+    if (!inode_exists) {
+      return NULL;
+    }
+
+    /* Entry d is either a directory (sub) or a file, check its inode->is_dir, then handle appropriately. */
+
     fd->file = filesys_open(kfile);
     if (fd->file != NULL) {
       struct thread* cur = thread_current();
@@ -405,3 +442,11 @@ int sys_practice(int input) { return input + 1; }
 
 /* Compute e and return a float cast to an int */
 int sys_compute_e(int n) { return sys_sum_to_e(n); }
+
+int sys_mmap(int handle, void* addr) {
+  return 0;
+}
+
+void sys_munmap(int mapid) {
+  return;
+}
