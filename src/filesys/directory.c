@@ -12,7 +12,7 @@
    given SECTOR.  Returns true if successful, false on failure. */
 bool dir_create(block_sector_t sector, size_t entry_cnt) {
   // Create the corresponding inode_disk with initial size to support the number of dir_entries we want
-  bool inode_success = inode_create(sector, (entry_cnt) * sizeof(struct dir_entry));
+  bool inode_success = inode_create(sector, (entry_cnt) * sizeof(struct dir_entry), true);
   if (!inode_success) {
     return false;
   }
@@ -22,7 +22,7 @@ bool dir_create(block_sector_t sector, size_t entry_cnt) {
   struct dir* new_dir = dir_open(dir_inode);
 
   // Add the entry "." -> its own sector
-  bool cur_entry_success = dir_add(new_dir, ".", sector, true);
+  bool cur_entry_success = dir_add(new_dir, ".", sector);
 
   if (!cur_entry_success) {
     dir_close(new_dir);

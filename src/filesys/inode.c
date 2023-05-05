@@ -36,18 +36,18 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
   memcpy(disk_inode, &buffer, BLOCK_SECTOR_SIZE); // inode_disk with its direct ... pointers, but in memory!
   
   if (pos < disk_inode->length) {
-    if (pos < 124 * BLOCK_SECTOR_SIZE) {
+    if (pos < DIRECTS_SIZE * BLOCK_SECTOR_SIZE) {
       // the position we want to read at is in one of the direct pointers
       block_sector_t sector_id = disk_inode->directs[pos / BLOCK_SECTOR_SIZE];
 
       free(disk_inode);
       return sector_id;
-    } else if (pos < 124 * BLOCK_SECTOR_SIZE + BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4) {
+    } else if (pos < DIRECTS_SIZE * BLOCK_SECTOR_SIZE + BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4) {
       // the position we want to read at has to go through the indirect pointer
       block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
       block_read(fs_device, disk_inode->indirect, &indirect_pointers);
       // then find the right pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the indirect references
-      off_t indirect_pos = pos - 124 * BLOCK_SECTOR_SIZE; // account for passing the direct pointers
+      off_t indirect_pos = pos - DIRECTS_SIZE * BLOCK_SECTOR_SIZE; // account for passing the direct pointers
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
 
       free(disk_inode);
@@ -57,7 +57,7 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
       block_sector_t dbl_indirect_pointers[BLOCK_SECTOR_SIZE / 4];
       block_read(fs_device, disk_inode->dbl_indirect, &dbl_indirect_pointers);
       // then find the right indirect pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the dbl indirect references
-      off_t new_pos = pos - (124 + BLOCK_SECTOR_SIZE / 4) * BLOCK_SECTOR_SIZE; // account for passing all direct pointers and the indirect pointer
+      off_t new_pos = pos - (DIRECTS_SIZE + BLOCK_SECTOR_SIZE / 4) * BLOCK_SECTOR_SIZE; // account for passing all direct pointers and the indirect pointer
       off_t dbl_index = new_pos / (BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4);
       
       block_sector_t indirect_id = dbl_indirect_pointers[dbl_index];
@@ -396,7 +396,7 @@ bool inode_is_dir (const struct inode *inode) {
     process_exit();
   }
   block_read(fs_device, inode->sector, disk_inode);
-  bool is_dir = disk_inode->isdir;
+  bool is_dir = disk_inode->is_dir;
   free(disk_inode);
   return is_dir;
 }

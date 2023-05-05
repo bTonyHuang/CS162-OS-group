@@ -6,6 +6,7 @@
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/directory.h"
+#include "filesys/inode.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "threads/interrupt.h"
@@ -161,42 +162,6 @@ static char* copy_in_string(const char* us) {
   return ks;
 }
 
-bool chdir(const char* dir_string) {
-  char* dir_path = copy_in_string(dir_string);
-
-  bool success = filesys_chdir(dir_path);
-
-  return success;
-}
-
-bool mkdir(const char* dir_string) {
-  char* dir_path = copy_in_string(dir_string);
-
-  filesys_create(dir_path, 0, true);
-}
-
-bool readdir(int fd, char name[READDIR_MAX_LEN + 1]) {
-  return syscall2(SYS_READDIR, fd, name);
-}
-
-/* Isdir system call. */
-bool isdir(int handle) {
-  struct file_descriptor* fd;
-  fd = lookup_fd(handle);
-  return fd->is_dir;
-}
-
-/* Inumber system call. */
-int inumber(int handle) {
-  struct file_descriptor* fd;
-  fd = lookup_fd(handle);
-  if (fd->is_dir) {
-    return dir_inumber(fd->file);
-  } else {
-    return file_inumber(fd->file);
-  }
-}
-
 /* Halt system call. */
 int sys_halt(void) { shutdown_power_off(); }
 
@@ -227,7 +192,7 @@ int sys_create(const char* ufile, unsigned initial_size) {
   char* kfile = copy_in_string(ufile);
   bool ok;
 
-  ok = filesys_create(kfile, initial_size);
+  ok = filesys_create(kfile, initial_size, false);
 
   palloc_free_page(kfile);
 
@@ -443,10 +408,57 @@ int sys_practice(int input) { return input + 1; }
 /* Compute e and return a float cast to an int */
 int sys_compute_e(int n) { return sys_sum_to_e(n); }
 
+/* Dummy syscall. */
 int sys_mmap(int handle, void* addr) {
   return 0;
 }
 
+/* Dummy syscall. */
 void sys_munmap(int mapid) {
   return;
+}
+
+/*changing the current working directory*/
+int sys_chdir(const char* udir) {
+  char* dir_path = copy_in_string(udir);
+
+  bool success = filesys_chdir(dir_path);
+
+  return success;
+}
+
+/*creating a new directory*/
+int sys_mkdir(const char* udir) {
+  char* dir_path = copy_in_string(udir);
+
+  return filesys_create(dir_path, 0, true);
+}
+
+/*read one dir-entry each time, increasing pos in dir. pass . and ..*/
+int sys_readdir(int handle, char name[READDIR_MAX_LEN + 1]) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  if (!fd->is_dir) {
+    return false;
+  }
+
+  return true;
+}
+
+/* Isdir system call. */
+int sys_isdir(int handle) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  return fd->is_dir;
+}
+
+/* Inumber system call. */
+int sys_inumber(int handle) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  if (fd->is_dir) {
+    return fd->dir->inode->sector;
+  } else {
+    return fd->file->inode->sector;
+  }
 }

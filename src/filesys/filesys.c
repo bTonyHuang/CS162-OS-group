@@ -40,7 +40,7 @@ bool filesys_create(const char* name, off_t initial_size, bool is_dir) {
   block_sector_t inode_sector = 0;
   char filename[NAME_MAX + 1];
   struct dir* container_dir = resolve(name, filename);
-  bool success = (container_dir != NULL && free_map_allocate(1, &inode_sector);
+  bool success = (container_dir != NULL && free_map_allocate(1, &inode_sector));
 
   if (!success && inode_sector != 0) {
     free_map_release(inode_sector, 1);
@@ -50,9 +50,11 @@ bool filesys_create(const char* name, off_t initial_size, bool is_dir) {
   
   /* Two cases for "file" creation, create and mkdir. */
   if (is_dir) {
-    success = dir_create(inode_sector, initial_size + 2) && dir_add(dir, name, inode_sector));
+    success = (dir_create(inode_sector, initial_size + 2) &&
+               dir_add(container_dir, name, inode_sector, is_dir));
   } else {
-    success = inode_create(inode_sector, initial_size, is_dir) && dir_add(dir, name, inode_sector));
+    success = (inode_create(inode_sector, initial_size, is_dir) &&
+               dir_add(container_dir, name, inode_sector, is_dir));
   }
   dir_close(container_dir);
 
