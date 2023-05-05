@@ -41,7 +41,7 @@ off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offs
   /*search the cache list via sector*/
   lock_acquire(&cache_lock);
   bool search_success = false;
-  struct elem* e;
+  struct list_elem* e;
   for (e = list_begin(&cache_list); e != list_end(&cache_list); e=list_next(e)){
     cache = list_entry(e, struct cache_entry, elem);
     if(cache->sector == sector){
