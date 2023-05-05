@@ -12,14 +12,14 @@ struct bitmap;
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-#define DIRECTS_SIZE 124
+#define DIRECTS_SIZE 123
 
 #define INDIRECT_SIZE 128
 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk {
-  block_sector_t directs[123]; /* Array of 123 direct pointers. */
+  block_sector_t directs[DIRECTS_SIZE]; /* Array of 123 direct pointers. */
   block_sector_t indirect;     /* Singly indirect pointer. */
   block_sector_t dbl_indirect; /* Doublely-indirect pointer. */
   bool is_dir;                 /* Whether the inode represenets a directory or a file. */
