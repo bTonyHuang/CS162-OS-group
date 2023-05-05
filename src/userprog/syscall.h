@@ -21,6 +21,17 @@ int sys_tell(int handle);
 int sys_close(int handle);
 int sys_practice(int input);
 int sys_compute_e(int n);
+int sys_pthread_create(stub_fun sfun, pthread_fun tfun, const void* arg);
+int sys_pthread_exit(void);
+int sys_pthread_join(int tid);
+int sys_lock_init(char* lock_ptr);
+int sys_lock_acquire(char* lock_ptr);
+int sys_lock_release(char* lock_ptr);
+int sys_sema_init(char* sema_ptr, int val);
+int sys_sema_down(char* sema_ptr);
+int sys_sema_up(char* sema_ptr);
+int sys_get_tid(void);
+
 int sys_chdir(const char* udir);
 int sys_mkdir(const char* udir);
 int sys_readdir(int handle, char* name);

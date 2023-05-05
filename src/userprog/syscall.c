@@ -160,6 +160,70 @@ static char* copy_in_string(const char* us) {
   }
   ks[PGSIZE - 1] = '\0';
   return ks;
+
+}
+
+/* Returns the file descriptor associated with the given handle.
+   Terminates the process if HANDLE is not associated with an
+   open file. */
+static struct file_descriptor* lookup_fd(int handle) {
+  struct thread* cur = thread_current();
+  struct list_elem* e;
+
+  for (e = list_begin(&cur->pcb->fds); e != list_end(&cur->pcb->fds); e = list_next(e)) {
+    struct file_descriptor* fd;
+    fd = list_entry(e, struct file_descriptor, elem);
+    if (fd->handle == handle)
+      return fd;
+  }
+
+  process_exit();
+  NOT_REACHED();
+}
+
+/*changing the current working directory*/
+int sys_chdir(const char* udir) {
+  char* dir_path = copy_in_string(udir);
+
+  bool success = filesys_chdir(dir_path);
+
+  return success;
+}
+
+/*creating a new directory*/
+int sys_mkdir(const char* udir) {
+  char* dir_path = copy_in_string(udir);
+
+  return sys_file_create(dir_path, 0, true);
+}
+
+/*read one dir-entry each time, increasing pos in dir. pass . and ..*/
+int sys_readdir(int handle, char name[READDIR_MAX_LEN + 1]) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  if (!fd->is_dir) {
+    return false;
+  }
+
+  return true;
+}
+
+/* Isdir system call. */
+int sys_isdir(int handle) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  return fd->is_dir;
+}
+
+/* Inumber system call. */
+int sys_inumber(int handle) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  if (fd->is_dir) {
+    return fd->dir->inode->sector;
+  } else {
+    return fd->file->inode->sector;
+  }
 }
 
 /* Halt system call. */
@@ -192,7 +256,7 @@ int sys_create(const char* ufile, unsigned initial_size) {
   char* kfile = copy_in_string(ufile);
   bool ok;
 
-  ok = filesys_create(kfile, initial_size, false);
+  ok = sys_file_create(kfile, initial_size, false);
 
   palloc_free_page(kfile);
 
@@ -245,24 +309,6 @@ int sys_open(const char* ufile) {
 
   palloc_free_page(kfile);
   return handle;
-}
-
-/* Returns the file descriptor associated with the given handle.
-   Terminates the process if HANDLE is not associated with an
-   open file. */
-static struct file_descriptor* lookup_fd(int handle) {
-  struct thread* cur = thread_current();
-  struct list_elem* e;
-
-  for (e = list_begin(&cur->pcb->fds); e != list_end(&cur->pcb->fds); e = list_next(e)) {
-    struct file_descriptor* fd;
-    fd = list_entry(e, struct file_descriptor, elem);
-    if (fd->handle == handle)
-      return fd;
-  }
-
-  process_exit();
-  NOT_REACHED();
 }
 
 /* Filesize system call. */
@@ -409,56 +455,51 @@ int sys_practice(int input) { return input + 1; }
 int sys_compute_e(int n) { return sys_sum_to_e(n); }
 
 /* Dummy syscall. */
-int sys_mmap(int handle, void* addr) {
+int sys_mmap(int handle UNUSED, void* addr UNUSED) {
   return 0;
 }
 
 /* Dummy syscall. */
-void sys_munmap(int mapid) {
+void sys_munmap(int mapid UNUSED) {
   return;
 }
 
-/*changing the current working directory*/
-int sys_chdir(const char* udir) {
-  char* dir_path = copy_in_string(udir);
-
-  bool success = filesys_chdir(dir_path);
-
-  return success;
+int sys_pthread_create(stub_fun sfun UNUSED, pthread_fun tfun UNUSED, const void* arg UNUSED) {
+  return 0;
 }
 
-/*creating a new directory*/
-int sys_mkdir(const char* udir) {
-  char* dir_path = copy_in_string(udir);
-
-  return filesys_create(dir_path, 0, true);
+int sys_pthread_exit(void) {
+  return 0;
 }
 
-/*read one dir-entry each time, increasing pos in dir. pass . and ..*/
-int sys_readdir(int handle, char name[READDIR_MAX_LEN + 1]) {
-  struct file_descriptor* fd;
-  fd = lookup_fd(handle);
-  if (!fd->is_dir) {
-    return false;
-  }
-
-  return true;
+int sys_pthread_join(int tid UNUSED) {
+  return tid;
 }
 
-/* Isdir system call. */
-int sys_isdir(int handle) {
-  struct file_descriptor* fd;
-  fd = lookup_fd(handle);
-  return fd->is_dir;
+int sys_lock_init(char* lock_ptr UNUSED) {
+  return 0;
 }
 
-/* Inumber system call. */
-int sys_inumber(int handle) {
-  struct file_descriptor* fd;
-  fd = lookup_fd(handle);
-  if (fd->is_dir) {
-    return fd->dir->inode->sector;
-  } else {
-    return fd->file->inode->sector;
-  }
+int sys_lock_acquire(char* lock_ptr UNUSED) {
+  return 0;
+}
+
+int sys_lock_release(char* lock_ptr UNUSED) {
+  return 0;
+}
+
+int sys_sema_init(char* sema_ptr UNUSED, int val UNUSED) {
+  return 0;
+}
+
+int sys_sema_down(char* sema_ptr UNUSED) {
+  return 0;
+}
+
+int sys_sema_up(char* sema_ptr UNUSED) {
+  return 0;
+}
+
+int sys_get_tid(void) {
+  return 0;
 }
