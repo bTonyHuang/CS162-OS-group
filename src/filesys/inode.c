@@ -291,6 +291,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
     }
     block_read(fs_device, inode->sector, disk_inode);
     bool success = inode_resize(disk_inode, offset + size);
+    block_write(fs_device, inode->sector, disk_inode);
     free(disk_inode);
 
     if (!success) {
