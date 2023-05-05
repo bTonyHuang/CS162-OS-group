@@ -123,7 +123,10 @@ static void start_process(void* exec_) {
     t->pcb->next_handle = 2;
     t->pcb->main_thread = t;
     strlcpy(t->pcb->process_name, t->name, sizeof t->name);
-    t->pcb->cwd = exec->cwd;
+    t->pcb->cwd = dir_reopen(exec->cwd);
+    if (t->pcb->cwd == NULL) {
+      success = false;
+    }
   }
 
   /* Allocate wait_status. */

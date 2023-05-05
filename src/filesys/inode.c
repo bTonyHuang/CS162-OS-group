@@ -99,7 +99,7 @@ void inode_init(void) {
    device.
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
-bool inode_create(block_sector_t sector, off_t length) {
+bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
   struct inode_disk* disk_inode = NULL;
   bool success = false;
 
@@ -112,6 +112,7 @@ bool inode_create(block_sector_t sector, off_t length) {
   disk_inode = calloc(1, sizeof *disk_inode);
   if (disk_inode != NULL) {
     disk_inode->length = length;
+    disk_inode->is_dir = is_dir;
     disk_inode->magic = INODE_MAGIC;
     success = inode_resize(disk_inode, length);
     if (success) {
@@ -385,6 +386,18 @@ off_t inode_length(const struct inode* inode) {
   off_t length = disk_inode->length;
   free(disk_inode);
   return length;
+}
+
+/* Returns true if inode is a directory, false if it's a file. */
+bool inode_is_dir (const struct inode *inode) {
+  struct inode_disk *disk_inode = calloc(1, sizeof(struct inode_disk));
+  if (!disk_inode) {
+    process_exit();
+  }
+  block_read(fs_device, inode->sector, disk_inode);
+  bool is_dir = disk_inode->isdir;
+  free(disk_inode);
+  return is_dir;
 }
 
 /* Grabs a new sector using free_map_allocate, and if successful, zeroes it out as well. */

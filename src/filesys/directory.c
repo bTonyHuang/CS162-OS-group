@@ -11,37 +11,43 @@
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
 bool dir_create(block_sector_t sector, size_t entry_cnt) {
+  // Create the corresponding inode_disk with initial size to support the number of dir_entries we want
   bool inode_success = inode_create(sector, (entry_cnt) * sizeof(struct dir_entry));
-  return inode_success;
-  // if (!inode_success) {
-  //   return false;
-  // }
+  if (!inode_success) {
+    return false;
+  }
 
-  // /* Might need null checks here. */
-  // struct inode* dir_inode = inode_open(sector);
-  // struct dir* new_dir = dir_open(dir_inode);
+  /* Might need null checks here. */
+  struct inode* dir_inode = inode_open(sector);
+  struct dir* new_dir = dir_open(dir_inode);
 
-  // bool cur_entry_success = dir_add(new_dir, ".", sector);
+  // Add the entry "." -> its own sector
+  bool cur_entry_success = dir_add(new_dir, ".", sector, true);
 
-  // if (cur_entry_success) {
-  //   dir_close(new_dir);
-  //   return false;
-  // }
+  if (!cur_entry_success) {
+    dir_close(new_dir);
+    return false;
+  }
 
-  // bool parent_entry_success;
-  // if (sector == ROOT_DIR_SECTOR) {
-  //   parent_entry_success = dir_add(new_dir, "..", sector);
-  // } else {
-  //   parent_entry_success = dir_add(new_dir, "..", parent_sector);
-  // }
+  /* Set the parent ".." dir entry. */
+  bool parent_entry_success;
+  if (sector == ROOT_DIR_SECTOR) {
+    /* Root is its own parent. */
+    parent_entry_success = dir_add(new_dir, "..", ROOT_DIR_SECTOR);
+  } else {
+    struct inode* cwd_inode = dir_get_inode(t->pcb->cwd);
+    block_sector_t cwd_sector = cwd_inode->sector;
 
-  // if (!parent_entry_success) {
-  //   dir_close(new_dir);
-  //   return false;
-  // }
+    parent_entry_success = dir_add(new_dir, "..", cwd_sector);
+  }  
 
-  // dir_close(new_dir);
-  // return true;
+  if (!parent_entry_success) {
+    dir_close(new_dir);
+    return false;
+  }
+
+  dir_close(new_dir);
+  return true;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -153,14 +159,11 @@ static int get_next_part(char part[NAME_MAX + 1], const char** srcp) {
   return 1;
 }
 
-/* Takes in an absolute or relative path string, and returns the corresponding dir*. */
-static struct dir* resolve(const char* path) {
-  struct dir* cur_dir;
-  /* Absolute directory. */
-  if (path[0] == '/') {
-    cur_dir = dir_open_root();
-  } else {
-    cur_dir = thread_current()->pcb->cwd;
+/* Takes in an absolute or relative path string, returns the container dir*, and stores the last item (dir or file) into filename. */
+static struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
+  /* Empty path. */
+  if (path[0] == '\0') {
+    return false;
   }
 
   char* path_copy = calloc(1, strlen(path) + 1);
@@ -169,26 +172,57 @@ static struct dir* resolve(const char* path) {
     NOT_REACHED();
   }
   strlcpy(path_copy, path, strlen(path) + 1);
-  char part[NAME_MAX + 1];
-  int part_valid = get_next_part(part, &path_copy);
+
+  struct inode* cur_inode;
+  struct inode* last_inode;
+  /* Absolute directory. */
+  if (path[0] == '/') {
+    cur_inode = inode_open(ROOT_DIR_SECTOR);
+  } else {
+    cur_inode = inode_reopen(thread_current()->pcb->cwd);
+  }
+  last_inode = cur_inode;
+
+  int part_valid = get_next_part(filename, &path_copy);
+
   while (part_valid != 0) {
     if (part_valid == -1) {
       /* Wee oo wee oo file name part is too long you are under arrest. */
-      process_exit();
-      NOT_REACHED();
-    }
-
-    struct inode* cur_inode;
-    bool dir_found = dir_lookup(cur_dir, part, &cur_inode);
-    if (!dir_found) {
+        // process_exit();
+        // NOT_REACHED();
+      free(path_copy);
       return NULL;
     }
+
+    struct dir* cur_dir = dir_open(inode_reopen(cur_inode));
+    bool dir_found = dir_lookup(cur_dir, filename, &last_inode);
     dir_close(cur_dir);
-    cur_dir = dir_open(cur_inode);
+    /* We have hit a file-type inode, so time to leave, cur_inode describing the parent directory of the file. */
+    if (inode_is_dir(last_inode) == false) {
+      break;
+    }
+    inode_close(cur_inode);
+    cur_inode = last_inode;
+
+    part_valid = get_next_part(filename, &path_copy);
   }
 
+  char dummy[NAME_MAX + 1];
+  /* If there are more path parts to parse, then the path is not well formed. */
+  if (get_next_part(dummy, &path_copy) == 1) {
+    return false;
+  }
+
+  /* Last inode in the path is a directory, set filename to "." */
+  if (last_inode == cur_inode) {
+    strlcpy(filename, ".", 2);
+  } else {
+    inode_close(last_inode);
+  }
+  
   free(path_copy);
-  return cur_dir;
+
+  return dir_open(cur_inode);
 }
 
 /* Adds a file named NAME to DIR, which must not already contain a

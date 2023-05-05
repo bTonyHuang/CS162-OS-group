@@ -5,6 +5,7 @@
 #include <syscall-nr.h>
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "threads/interrupt.h"
@@ -140,6 +141,38 @@ static char* copy_in_string(const char* us) {
   }
   ks[PGSIZE - 1] = '\0';
   return ks;
+}
+
+bool chdir(const char* dir_string) {
+  char* dir_path = copy_in_string(dir_string);
+
+  bool success = filesys_chdir(dir_path);
+
+  return success;
+}
+
+bool mkdir(const char* dir_string) {
+  char* dir_path = copy_in_string(dir_string);
+
+  filesys_create(dir_path, 0, true);
+}
+
+bool readdir(int fd, char name[READDIR_MAX_LEN + 1]) {
+  return syscall2(SYS_READDIR, fd, name);
+}
+
+/* Isdir system call. */
+bool isdir(int handle) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  return file_is_dir(struct file *file);
+}
+
+/* Inumber system call. */
+int inumber(int handle) {
+  struct file_descriptor* fd;
+  fd = lookup_fd(handle);
+  return file_inumber(struct file *file);
 }
 
 /* Halt system call. */
