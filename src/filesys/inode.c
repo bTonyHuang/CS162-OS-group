@@ -199,6 +199,7 @@ void inode_close(struct inode* inode) {
       }
       block_read(fs_device, inode->sector, disk_inode);
       inode_resize(disk_inode, 0);
+      block_write(fs_device, inode->sector, disk_inode);
       free_map_release(inode->sector, 1);
       // old freeing of data sectors
       // free_map_release(inode->data.start, bytes_to_sectors(inode->data.length));
@@ -288,7 +289,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
     // get inode_disk into memory
     struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
     if (!disk_inode) {
-      return;
+      return 0;
     }
     block_read(fs_device, inode->sector, disk_inode);
     bool success = inode_resize(disk_inode, offset + size);
