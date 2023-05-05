@@ -19,6 +19,11 @@ int sys_tell(int handle);
 int sys_close(int handle);
 int sys_practice(int input);
 int sys_compute_e(int n);
+int sys_chdir(const char* udir);
+int sys_mkdir(const char* udir);
+int sys_readdir(int handle, char* name);
+int sys_isdir(int handle);
+int sys_inumber(int handle);
 
 void syscall_init(void);
 void safe_file_close(struct file* file);
