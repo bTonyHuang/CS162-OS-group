@@ -156,7 +156,7 @@ void filesys_done(void) {
     if (cache->dirty) {
       block_write(fs_device, cache->sector, cache->data);
     }
-    e = list_next(e);
+    e = list_remove(e);
     free(cache);
   }
   //lock_release(&cache_lock);
