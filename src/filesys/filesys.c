@@ -13,12 +13,68 @@ struct block* fs_device;
 
 static void do_format(void);
 
+/*buffer cache operation: whenever we call block_read or block_write, use cache operations instead*/
+#define CACHE_MAX 64
+
+struct lock cache_lock; // Disallows simultaneous modification to the cache list
+
+struct list cache_list; // List of cache entries, capped at 64 entries
+
+struct cache_entry {
+  block_sector_t sector;           // Block index
+  bool valid;                      // Flag indicating whether the entry contains valid data
+  bool dirty;                      // Flag indicating whether the entry has been modified
+  uint8_t data[BLOCK_SECTOR_SIZE]; // Block data, 512 bytes, inode_disk, file data
+  struct lock block_lock;          // Serializes operations on individual data blocks.
+  struct list_elem elem;           // For organizing into a list of cache_entries
+};
+
+
+/*check if the sector is in the cache. If in, read the cache; 
+  If not, call block_read, and write it to cache, evicting cache entry if necessary */
+off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offset) {
+  uint8_t* buffer = buffer_;
+  off_t bytes_read = 0;
+  uint8_t* bounce = NULL;
+  struct cache_entry* cache;
+
+  /*search the cache list via sector*/
+  lock_acquire(&cache_lock);
+  bool search_success = false;
+  struct list_elem* e;
+  for (e = list_begin(&cache_list); e != list_end(&cache_list); e=list_next(e)){
+    cache = list_entry(e, struct cache_entry, elem);
+    if(cache->sector == sector){
+      search_success = true;
+      break;
+    }
+  }
+
+  /*call block_read to read the sector to cache*/
+  if(!search_success){
+    cache = calloc(1, sizeof(struct cache_entry));
+    block_read(fs_device, sector, cache->data);
+  }
+
+  lock_release(&cache_list);
+
+  return bytes_read;
+}
+
+/*write the cache, mark the dirty bit*/
+off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off_t offset){
+
+}
+
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
 void filesys_init(bool format) {
   fs_device = block_get_role(BLOCK_FILESYS);
   if (fs_device == NULL)
     PANIC("No file system device found, can't initialize file system.");
+
+  //initialize cache list
+  list_init(&cache_list);
 
   inode_init();
   free_map_init();
