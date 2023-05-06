@@ -75,7 +75,7 @@ pid_t process_execute(const char* file_name) {
   /* Initialize exec_info. */
   exec.file_name = file_name;
   sema_init(&exec.load_done, 0);
-  if (exec.cwd == NULL) {
+  if (thread_current()->pcb->cwd == NULL) {
     exec.cwd = dir_open_root();
   } else {
     exec.cwd = thread_current()->pcb->cwd;

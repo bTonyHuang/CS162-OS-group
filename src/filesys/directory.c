@@ -161,72 +161,70 @@ static int get_next_part(char part[NAME_MAX + 1], const char** srcp) {
 }
 
 /* Takes in an absolute or relative path string, returns the container dir*, and stores the last item (dir or file) into filename. */
+/* Given some path /a/b/c/d for example, we wish to return dir* c, and also copy d into filename buffer. */
+/* The reason for this is d could be either a file, or another directory. */
+
+// chdir /a/b/c/d
+// resolve(/a/b/c/d) -> dir* c, filename "d"
+// dir_lookup(c, d) -> inode -> file or a directory
+
 struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
   /* Empty path. */
   if (path[0] == '\0') {
-    return false;
+    return NULL;
   }
 
   char* path_copy = calloc(1, strlen(path) + 1);
+  char* path_copy_copy = path_copy;
   if (path_copy == NULL) {
     process_exit();
     NOT_REACHED();
   }
   strlcpy(path_copy, path, strlen(path) + 1);
 
-  struct inode* cur_inode;
-  struct inode* last_inode;
-  /* Absolute directory. */
+  // initialization of "cur directory"
+  struct dir* cur_directory;
+  
+  /* While loop will iterate the path components and update cur_inode each time. */
   if (path[0] == '/') {
-    cur_inode = inode_open(ROOT_DIR_SECTOR);
+    /* Absolute directory. */
+    cur_directory = dir_open_root();
   } else {
-    cur_inode = inode_reopen(thread_current()->pcb->cwd);
+    /* Initialize the cur_inode to be cwd. */
+    if (thread_current()->pcb->cwd) {
+      cur_directory = dir_reopen(thread_current()->pcb->cwd);
+    } else {
+      cur_directory = dir_open_root();
+    }
   }
-  if (cur_inode == NULL) {
-    cur_inode = inode_open(ROOT_DIR_SECTOR);
-  }
-  last_inode = cur_inode;
 
   int part_valid = get_next_part(filename, &path_copy);
 
   while (part_valid != 0) {
-    if (part_valid == -1) {
-      /* Wee oo wee oo file name part is too long you are under arrest. */
-        // process_exit();
-        // NOT_REACHED();
-      free(path_copy);
-      return NULL;
-    }
-
-    struct dir* cur_dir = dir_open(inode_reopen(cur_inode));
-    bool dir_found = dir_lookup(cur_dir, filename, &last_inode);
-    dir_close(cur_dir);
-    /* We have hit a file-type inode, so time to leave, cur_inode describing the parent directory of the file. */
-    if (inode_is_dir(last_inode) == false) {
+    // perform a dir_lookup(cur_directory, filename = "a") -> a's inode
+    struct inode* check_inode;
+    bool found_part = dir_lookup(cur_directory, filename, &check_inode); // look for a inside cwd, and if found puts a's inode into check_inode
+    
+    // if a's inode is a FILE, then GET OUT. 
+    // if (!inode_is_dir(check_inode)) {
+    if (strlen(path_copy) == 0) {
       break;
     }
-    inode_close(cur_inode);
-    cur_inode = last_inode;
 
+    if (!found_part) {
+      dir_close(cur_directory);
+      return NULL;
+    }
+    // close(cur_directory)
+    dir_close(cur_directory);
+    // cur_directory = dir_open a's inode
+    cur_directory = dir_open(check_inode);
     part_valid = get_next_part(filename, &path_copy);
   }
 
-  char dummy[NAME_MAX + 1];
-  /* If there are more path parts to parse, then the path is not well formed. */
-  if (get_next_part(dummy, &path_copy) == 1) {
-    return false;
-  }
+  free(path_copy_copy);
 
-  /* Last inode in the path is a directory, set filename to "." */
-  if (last_inode == cur_inode) {
-    strlcpy(filename, ".", 2);
-  } else {
-    inode_close(last_inode);
-  }
-  
-  free(path_copy);
-
-  return dir_open(cur_inode);
+  return cur_directory;
 }
 
 /* Adds a file named NAME to DIR, which must not already contain a

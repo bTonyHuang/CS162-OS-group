@@ -52,6 +52,7 @@ off_t inode_write_at(struct inode*, const void*, off_t size, off_t offset);
 void inode_deny_write(struct inode*);
 void inode_allow_write(struct inode*);
 off_t inode_length(const struct inode*);
+bool inode_is_dir (const struct inode *inode);
 
 bool inode_resize(struct inode_disk* id, off_t size);
 bool indirect_block_check(block_sector_t* indirect, off_t size);

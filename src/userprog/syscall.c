@@ -194,7 +194,11 @@ int sys_chdir(const char* udir) {
 int sys_mkdir(const char* udir) {
   char* dir_path = copy_in_string(udir);
 
-  return sys_file_create(dir_path, 0, true);
+  if (dir_path[0] == '\0') {
+    return 0;
+  }
+
+  return filesys_create(dir_path, 16, true);
 }
 
 /*read one dir-entry each time, increasing pos in dir. pass . and ..*/
@@ -205,7 +209,15 @@ int sys_readdir(int handle, char name[READDIR_MAX_LEN + 1]) {
     return false;
   }
 
-  return true;
+  /* Reads the next directory entry in DIR and stores the name in
+   NAME.  Returns true if successful, false if the directory
+   contains no more entries. */
+  bool success = dir_readdir(fd->dir, name);
+  while (!strcmp(name, ".") || !strcmp(name, "..")) {
+    success = dir_readdir(fd->dir,name);
+  }
+
+  return success;
 }
 
 /* Isdir system call. */
@@ -256,7 +268,7 @@ int sys_create(const char* ufile, unsigned initial_size) {
   char* kfile = copy_in_string(ufile);
   bool ok;
 
-  ok = sys_file_create(kfile, initial_size, false);
+  ok = filesys_create(kfile, initial_size, false);
 
   palloc_free_page(kfile);
 
@@ -281,30 +293,39 @@ int sys_open(const char* ufile) {
   struct file_descriptor* fd;
   int handle = -1;
 
-  fd = malloc(sizeof *fd);
+  fd = calloc(1, sizeof *fd);
   if (fd != NULL) {
     /* for some file path /a/b/c/d/, this logic grabs the inode corresponding to entry d. */
     char filename[NAME_MAX + 1];
     struct dir* container_dir = resolve(kfile, filename);
     if (container_dir == NULL) {
-      return NULL;
+      free(fd);
+      return handle;
     }
     struct inode* inode;
     bool inode_exists = dir_lookup(container_dir, filename, &inode);
     dir_close(container_dir);
     if (!inode_exists) {
-      return NULL;
+      free(fd);
+      return handle;
     }
 
     /* Entry d is either a directory (sub) or a file, check its inode->is_dir, then handle appropriately. */
+    if (inode_is_dir(inode)) {
+      fd->dir = dir_open(inode);
+      fd->is_dir = true;
+    } else {
+      fd->file = file_open(inode);
+      fd->is_dir = false;
+    }
 
-    fd->file = filesys_open(kfile);
-    if (fd->file != NULL) {
+    if (fd->dir || fd->file) {
       struct thread* cur = thread_current();
       handle = fd->handle = cur->pcb->next_handle++;
       list_push_front(&cur->pcb->fds, &fd->elem);
-    } else
+    } else {
       free(fd);
+    }
   }
 
   palloc_free_page(kfile);
