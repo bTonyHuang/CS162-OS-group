@@ -1,6 +1,7 @@
 #include "filesys/filesys.h"
 #include <debug.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "filesys/file.h"
 #include "filesys/free-map.h"
@@ -22,48 +23,102 @@ struct list cache_list; // List of cache entries, capped at 64 entries
 
 struct cache_entry {
   block_sector_t sector;           // Block index
-  bool valid;                      // Flag indicating whether the entry contains valid data
   bool dirty;                      // Flag indicating whether the entry has been modified
   uint8_t data[BLOCK_SECTOR_SIZE]; // Block data, 512 bytes, inode_disk, file data
   struct lock block_lock;          // Serializes operations on individual data blocks.
   struct list_elem elem;           // For organizing into a list of cache_entries
 };
 
-
-/*check if the sector is in the cache. If in, read the cache; 
-  If not, call block_read, and write it to cache, evicting cache entry if necessary */
 off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offset) {
   uint8_t* buffer = buffer_;
-  off_t bytes_read = 0;
-  uint8_t* bounce = NULL;
   struct cache_entry* cache;
 
   /*search the cache list via sector*/
   lock_acquire(&cache_lock);
   bool search_success = false;
   struct list_elem* e;
-  for (e = list_begin(&cache_list); e != list_end(&cache_list); e=list_next(e)){
+  for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e)) {
     cache = list_entry(e, struct cache_entry, elem);
-    if(cache->sector == sector){
+    if (cache->sector == sector) {
       search_success = true;
+      list_remove(e);
+      list_push_front(&cache_list, e);
+      //important order, first grab the cache_entry's lock and then free global lock
+      lock_acquire(&cache->block_lock);
+      lock_release(&cache_lock);
       break;
     }
   }
 
   /*call block_read to read the sector to cache*/
-  if(!search_success){
+  if (!search_success) {
     cache = calloc(1, sizeof(struct cache_entry));
     block_read(fs_device, sector, cache->data);
+    //checking if need to evict
+    if (list_size(&cache_list) >= 64) {
+      struct cache_entry* write_back =
+          list_entry(list_pop_back(&cache_list), struct cache_entry, elem);
+      //write to disk if modified
+      if (write_back->dirty) {
+        block_write(fs_device, write_back->sector, write_back->data);
+      }
+    }
+    list_push_front(&cache_list, &cache->elem);
+    lock_acquire(&cache->block_lock);
+    lock_release(&cache_lock);
   }
 
-  lock_release(&cache_list);
+  /*read the cache to the buffer*/
+  memcpy(buffer, cache->data + offset, size);
+  lock_release(&cache->block_lock);
 
-  return bytes_read;
+  return size;
 }
 
 /*write the cache, mark the dirty bit*/
-off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off_t offset){
+off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off_t offset) {
+  uint8_t* buffer = buffer_;
+  struct cache_entry* cache;
 
+  /*search the cache list via sector*/
+  lock_acquire(&cache_lock);
+  bool search_success = false;
+  struct list_elem* e;
+  for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e)) {
+    cache = list_entry(e, struct cache_entry, elem);
+    if (cache->sector == sector) {
+      search_success = true;
+      list_remove(e);
+      list_push_front(&cache_list, e);
+      lock_acquire(&cache->block_lock);
+      lock_release(&cache_lock);
+      break;
+    }
+  }
+
+  /*call block_read to read the sector to cache*/
+  if (!search_success) {
+    cache = calloc(1, sizeof(struct cache_entry));
+    block_read(fs_device, sector, cache->data);
+    //checking if need to evict
+    if (list_size(&cache_list) >= 64) {
+      struct cache_entry* write_back =
+          list_entry(list_pop_back(&cache_list), struct cache_entry, elem);
+      //write to disk if modified
+      if (write_back->dirty) {
+        block_write(fs_device, write_back->sector, write_back->data);
+      }
+    }
+    list_push_front(&cache_list, &cache->elem);
+    lock_acquire(&cache->block_lock);
+    lock_release(&cache_lock);
+  }
+
+  /*write the cache from the buffer*/
+  memcpy(cache->data + offset, buffer, size);
+  lock_release(&cache->block_lock);
+
+  return size;
 }
 
 /* Initializes the file system module.
