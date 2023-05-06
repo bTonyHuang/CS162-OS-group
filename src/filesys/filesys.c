@@ -236,11 +236,38 @@ bool filesys_remove(const char* name) {
   if (container_dir == NULL) {
     return false;
   }
-  bool remove_success = dir_remove(container_dir, filename);
-  /* Resolve incremented open_cnt for container_dir, but now we're done with it. */
-  dir_close(container_dir);
+  struct inode* inode;
+  bool found_entry = dir_lookup(container_dir, filename, &inode);
+  if (!found_entry) {
+    dir_close(container_dir);
+    return false;
+  }
 
-  return remove_success;
+  bool remove_success;
+  if (!inode_is_dir(inode)) {
+    /* If entry is a file, we are good to REMOVE. */
+    remove_success = dir_remove(container_dir, filename);
+    /* Resolve incremented open_cnt for container_dir, but now we're done with it. */
+    dir_close(container_dir);
+
+    return remove_success;
+  } else {
+    struct dir* dir_to_remove = dir_open(inode);
+    /* If entry is a directory, we gotta check its open_cnt first! */
+    char name[NAME_MAX + 1];
+    bool has_entries = dir_readdir(dir_to_remove, name);
+    dir_close(dir_to_remove);
+
+    if (!has_entries && inode->open_cnt <= 1 && inode->sector != thread_current()->pcb->cwd->inode->sector) {
+      remove_success = dir_remove(container_dir, filename);
+      dir_close(container_dir);
+      return remove_success;
+    } else {
+      /* Open count disallows us from removing the directory. */
+      dir_close(container_dir);
+      return false;
+    }
+  }
 }
 
 /* Changes the current working directory of the current thread to the directory located at PATH.
