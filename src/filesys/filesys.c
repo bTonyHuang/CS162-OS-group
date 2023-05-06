@@ -226,8 +226,13 @@ bool filesys_remove(const char* name) {
 
     return remove_success;
   } else {
+    struct dir* dir_to_remove = dir_open(inode);
     /* If entry is a directory, we gotta check its open_cnt first! */
-    if (inode->open_cnt <= 1 && inode->sector != thread_current()->pcb->cwd->inode->sector) {
+    char name[NAME_MAX + 1];
+    bool has_entries = dir_readdir(dir_to_remove, name);
+    dir_close(dir_to_remove);
+
+    if (!has_entries && inode->open_cnt <= 1 && inode->sector != thread_current()->pcb->cwd->inode->sector) {
       remove_success = dir_remove(container_dir, filename);
       dir_close(container_dir);
       return remove_success;
