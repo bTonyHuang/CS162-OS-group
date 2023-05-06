@@ -208,6 +208,7 @@ struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
     // if a's inode is a FILE, then GET OUT. 
     // if (!inode_is_dir(check_inode)) {
     if (strlen(path_copy) == 0) {
+      inode_close(check_inode);
       break;
     }
 
