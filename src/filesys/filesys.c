@@ -119,6 +119,7 @@ off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off
       if (write_back->dirty) {
         block_write(fs_device, write_back->sector, write_back->data);
       }
+      free(cache);
     }
     list_push_front(&cache_list, &cache->elem);
     lock_acquire(&cache->block_lock);
@@ -166,6 +167,7 @@ void filesys_done(void) {
     if (cache->dirty) {
       block_write(fs_device, cache->sector, cache->data);
     }
+    free(cache);
   }
   //lock_release(&cache_lock);
   return;
