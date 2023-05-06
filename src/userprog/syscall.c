@@ -358,9 +358,9 @@ int sys_read(int handle, void* udst_, unsigned size) {
 
   /* Handle all other reads. */
   fd = lookup_fd(handle);
-  // if (fd->is_dir) {
-  //   process_exit();
-  // }
+  if (fd->is_dir) {
+    return -1;
+  }
   while (size > 0) {
     /* How much to read into this page? */
     size_t page_left = PGSIZE - pg_ofs(udst);
@@ -400,11 +400,12 @@ int sys_write(int handle, void* usrc_, unsigned size) {
   int bytes_written = 0;
 
   /* Lookup up file descriptor. */
-  if (handle != STDOUT_FILENO)
+  if (handle != STDOUT_FILENO) {
     fd = lookup_fd(handle);
-    // if (fd->is_dir) {
-    //   process_exit();
-    // }
+    if (fd->is_dir) {
+      return -1;
+    }
+  }
 
   while (size > 0) {
     /* How much bytes to write to this page? */

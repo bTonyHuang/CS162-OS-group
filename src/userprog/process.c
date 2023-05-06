@@ -233,6 +233,8 @@ void process_exit(void) {
     NOT_REACHED();
   }
 
+  dir_close(cur->pcb->cwd);
+
   /* Close executable (and allow writes). */
   safe_file_close(cur->pcb->bin_file);
 
