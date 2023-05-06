@@ -53,6 +53,11 @@ off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offs
   /*call block_read to read the sector to cache*/
   if (!search_success) {
     cache = calloc(1, sizeof(struct cache_entry));
+    if(!cache){
+      process_exit();
+    }
+    lock_init(&cache->block_lock);
+    cache->sector = sector;
     block_read(fs_device, sector, cache->data);
     //checking if need to evict
     if (list_size(&cache_list) >= 64) {
@@ -77,7 +82,7 @@ off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offs
 
 /*write the cache, mark the dirty bit*/
 off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off_t offset) {
-  uint8_t* buffer = buffer_;
+  const uint8_t* buffer = buffer_;
   struct cache_entry* cache;
 
   /*search the cache list via sector*/
@@ -99,6 +104,11 @@ off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off
   /*call block_read to read the sector to cache*/
   if (!search_success) {
     cache = calloc(1, sizeof(struct cache_entry));
+    if (!cache) {
+      process_exit();
+    }
+    lock_init(&cache->block_lock);
+    cache->sector = sector;
     block_read(fs_device, sector, cache->data);
     //checking if need to evict
     if (list_size(&cache_list) >= 64) {
@@ -116,6 +126,7 @@ off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off
 
   /*write the cache from the buffer*/
   memcpy(cache->data + offset, buffer, size);
+  cache->dirty = true;
   lock_release(&cache->block_lock);
 
   return size;
@@ -128,8 +139,9 @@ void filesys_init(bool format) {
   if (fs_device == NULL)
     PANIC("No file system device found, can't initialize file system.");
 
-  //initialize cache list
+  //initialize cache list and cache_lock
   list_init(&cache_list);
+  lock_init(&cache_lock);
 
   inode_init();
   free_map_init();
@@ -142,7 +154,21 @@ void filesys_init(bool format) {
 
 /* Shuts down the file system module, writing any unwritten data
    to disk. */
-void filesys_done(void) { free_map_close(); }
+void filesys_done(void) { 
+  free_map_close(); 
+  /*write dirty cache back to disk, speed is needed so we get rid of global lock*/
+  struct list_elem* e;
+  struct cache_entry* cache;
+  //lock_acquire(&cache_lock);
+  for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e)) {
+    cache = list_entry(e, struct cache_entry, elem);
+    if (cache->dirty) {
+      block_write(fs_device, cache->sector, cache->data);
+    }
+  }
+  //lock_release(&cache_lock);
+  return;
+}
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
