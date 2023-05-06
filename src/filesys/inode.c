@@ -26,17 +26,13 @@ static inline size_t bytes_to_sectors(off_t size) { return DIV_ROUND_UP(size, BL
 
 static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
   ASSERT(inode != NULL);
-  // https://edstem.org/us/courses/33980/discussion/2905210?comment=6916229 stack memcpy strat, need to change to inplace once buffer cache is introduced
   struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
   if(!disk_inode){
     return -1;
   }
-  uint8_t buffer[BLOCK_SECTOR_SIZE]; // array of 512 bytes
-  /*block_read(fs_device, inode->sector, &buffer);
-  memcpy(disk_inode, &buffer,
-         BLOCK_SECTOR_SIZE); // inode_disk with its direct ... pointers, but in memory!*/
   cache_read_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
 
+  
   if (pos < disk_inode->length) {
     if (pos < DIRECTS_SIZE * BLOCK_SECTOR_SIZE) {
       // the position we want to read at is in one of the direct pointers

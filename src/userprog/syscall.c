@@ -342,10 +342,10 @@ int sys_open(const char* ufile) {
 /* Filesize system call. */
 int sys_filesize(int handle) {
   struct file_descriptor* fd = lookup_fd(handle);
-  int size;
-   
-  size = file_length(fd->file);
-
+  int size = -1;
+  if(!fd->is_dir){
+    size = file_length(fd->file);
+  }
   return size;
 }
 
@@ -453,7 +453,7 @@ int sys_write(int handle, void* usrc_, unsigned size) {
 /* Seek system call. */
 int sys_seek(int handle, unsigned position) {
   struct file_descriptor* fd = lookup_fd(handle);
-  if ((off_t)position >= 0)
+  if (fd->file && (off_t)position >= 0)
     file_seek(fd->file, position);
   return 0;
 }
@@ -461,9 +461,10 @@ int sys_seek(int handle, unsigned position) {
 /* Tell system call. */
 int sys_tell(int handle) {
   struct file_descriptor* fd = lookup_fd(handle);
-  unsigned position;
-
-  position = file_tell(fd->file);
+  unsigned position = 0;
+  
+  if(fd->file)
+    position = file_tell(fd->file);
 
   return position;
 }
@@ -471,7 +472,10 @@ int sys_tell(int handle) {
 /* Close system call. */
 int sys_close(int handle) {
   struct file_descriptor* fd = lookup_fd(handle);
-  safe_file_close(fd->file);
+  if(fd->dir)
+    dir_close(fd->dir);
+  else
+    safe_file_close(fd->file);
   list_remove(&fd->elem);
   free(fd);
   return 0;
