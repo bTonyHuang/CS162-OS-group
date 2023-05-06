@@ -67,6 +67,7 @@ off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offs
       if (write_back->dirty) {
         block_write(fs_device, write_back->sector, write_back->data);
       }
+      free(write_back);
     }
     list_push_front(&cache_list, &cache->elem);
     lock_acquire(&cache->block_lock);
@@ -217,13 +218,28 @@ bool filesys_create(const char* name, off_t initial_size, bool is_dir) {
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 struct file* filesys_open(const char* name) {
-  struct dir* dir = dir_open_root();
-  struct inode* inode = NULL;
+  char filename[NAME_MAX + 1];
+  struct dir* container_dir = resolve(name, filename);
+  if (container_dir == NULL) {
+    return false;
+  }
+  struct inode* inode;
+  bool found_entry = dir_lookup(container_dir, filename, &inode);
+  if (!found_entry) {
+    dir_close(container_dir);
+    return false;
+  }
 
-  if (dir != NULL)
-    dir_lookup(dir, name, &inode);
-  dir_close(dir);
+  dir_close(container_dir);
   return file_open(inode);
+
+  // struct dir* dir = dir_open_root();
+  // struct inode* inode = NULL;
+
+  // if (dir != NULL)
+  //   dir_lookup(dir, name, &inode);
+  // dir_close(dir);
+  // return file_open(inode);
 }
 
 /* Deletes the file named NAME.
