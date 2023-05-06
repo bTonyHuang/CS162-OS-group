@@ -230,15 +230,16 @@ bool filesys_remove(const char* name) {
     /* If entry is a directory, we gotta check its open_cnt first! */
     char name[NAME_MAX + 1];
     bool has_entries = dir_readdir(dir_to_remove, name);
-    dir_close(dir_to_remove);
 
-    if (!has_entries && inode->open_cnt <= 1 && inode->sector != thread_current()->pcb->cwd->inode->sector) {
+    if (!has_entries && inode->open_cnt <= 1 && !inode->is_cwd) {
       remove_success = dir_remove(container_dir, filename);
       dir_close(container_dir);
+      dir_close(dir_to_remove);
       return remove_success;
     } else {
       /* Open count disallows us from removing the directory. */
       dir_close(container_dir);
+      dir_close(dir_to_remove);
       return false;
     }
   }
@@ -249,6 +250,11 @@ bool filesys_remove(const char* name) {
 bool filesys_chdir(const char *path) {
   struct thread *t = thread_current();
   char filename[NAME_MAX + 1];
+
+  if (path[0] == '/' && path[1] == '\0') {
+    t->pcb->cwd = dir_open_root();
+    return true;
+  }
 
   struct dir* container_dir = resolve(path, filename);
   if (container_dir == NULL) {
@@ -268,6 +274,7 @@ bool filesys_chdir(const char *path) {
 
   dir_close(t->pcb->cwd);
   t->pcb->cwd = dir_open(inode);
+  t->pcb->cwd->inode->is_cwd = true;
   return true;
 }
 

@@ -18,6 +18,7 @@ bool dir_create(block_sector_t sector, size_t entry_cnt) {
   }
 
   /* Might need null checks here. */
+  // +++++++++
   struct inode* dir_inode = inode_open(sector);
   struct dir* new_dir = dir_open(dir_inode);
 
@@ -34,10 +35,12 @@ bool dir_create(block_sector_t sector, size_t entry_cnt) {
   if (sector == ROOT_DIR_SECTOR) {
     /* Root is its own parent. */
     parent_entry_success = dir_add(new_dir, "..", ROOT_DIR_SECTOR);
+    dir_inode->is_cwd = true;
   } else {
     struct thread* t = thread_current();
     struct inode* cwd_inode = dir_get_inode(t->pcb->cwd);
     block_sector_t cwd_sector = cwd_inode->sector;
+    dir_inode->is_cwd = false;
 
     parent_entry_success = dir_add(new_dir, "..", cwd_sector);
   }  
@@ -47,6 +50,7 @@ bool dir_create(block_sector_t sector, size_t entry_cnt) {
     return false;
   }
 
+  // ---------
   dir_close(new_dir);
   return true;
 }
@@ -203,6 +207,7 @@ struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
   while (part_valid != 0) {
     // perform a dir_lookup(cur_directory, filename = "a") -> a's inode
     struct inode* check_inode;
+    // +++++++ inode cnt
     bool found_part = dir_lookup(cur_directory, filename, &check_inode); // look for a inside cwd, and if found puts a's inode into check_inode
     
     // if a's inode is a FILE, then GET OUT. 
@@ -213,6 +218,7 @@ struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
     }
 
     if (!found_part) {
+      inode_close(check_inode);
       dir_close(cur_directory);
       return NULL;
     }
@@ -220,6 +226,7 @@ struct dir* resolve(const char* path, char filename[NAME_MAX + 1]) {
     dir_close(cur_directory);
     // cur_directory = dir_open a's inode
     cur_directory = dir_open(check_inode);
+    // inode_close(check_inode);
     part_valid = get_next_part(filename, &path_copy);
   }
 

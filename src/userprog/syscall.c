@@ -213,9 +213,9 @@ int sys_readdir(int handle, char name[READDIR_MAX_LEN + 1]) {
    NAME.  Returns true if successful, false if the directory
    contains no more entries. */
   bool success = dir_readdir(fd->dir, name);
-  while (!strcmp(name, ".") || !strcmp(name, "..")) {
-    success = dir_readdir(fd->dir,name);
-  }
+  // while (!strcmp(name, ".") || !strcmp(name, "..")) {
+  //   success = dir_readdir(fd->dir,name);
+  // }
 
   return success;
 }
@@ -232,9 +232,9 @@ int sys_inumber(int handle) {
   struct file_descriptor* fd;
   fd = lookup_fd(handle);
   if (fd->is_dir) {
-    return fd->dir->inode->sector;
+    return (int) dir_inumber(fd->dir);
   } else {
-    return fd->file->inode->sector;
+    return (int) file_inumber(fd->file);
   }
 }
 
@@ -297,26 +297,33 @@ int sys_open(const char* ufile) {
   if (fd != NULL) {
     /* for some file path /a/b/c/d/, this logic grabs the inode corresponding to entry d. */
     char filename[NAME_MAX + 1];
+    filename[0] = '\0';
     struct dir* container_dir = resolve(kfile, filename);
     if (container_dir == NULL) {
       free(fd);
       return handle;
     }
-    struct inode* inode;
-    bool inode_exists = dir_lookup(container_dir, filename, &inode);
-    dir_close(container_dir);
-    if (!inode_exists) {
-      free(fd);
-      return handle;
-    }
-
-    /* Entry d is either a directory (sub) or a file, check its inode->is_dir, then handle appropriately. */
-    if (inode_is_dir(inode)) {
-      fd->dir = dir_open(inode);
+    // check if opening root directory
+    if (container_dir->inode->sector == thread_current()->pcb->cwd->inode->sector && filename[0] == '\0') {
+      fd->dir = dir_open_root();
       fd->is_dir = true;
     } else {
-      fd->file = file_open(inode);
-      fd->is_dir = false;
+      struct inode* inode;
+      bool inode_exists = dir_lookup(container_dir, filename, &inode);
+      dir_close(container_dir);
+      if (!inode_exists) {
+        free(fd);
+        return handle;
+      }
+
+      /* Entry d is either a directory (sub) or a file, check its inode->is_dir, then handle appropriately. */
+      if (inode_is_dir(inode)) {
+        fd->dir = dir_open(inode);
+        fd->is_dir = true;
+      } else {
+        fd->file = file_open(inode);
+        fd->is_dir = false;
+      }
     }
 
     if (fd->dir || fd->file) {
