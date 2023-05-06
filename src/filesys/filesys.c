@@ -29,50 +29,67 @@ struct cache_entry {
   struct list_elem elem;           // For organizing into a list of cache_entries
 };
 
-off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offset) {
-  uint8_t* buffer = buffer_;
-  struct cache_entry* cache;
-
-  /*search the cache list via sector*/
-  lock_acquire(&cache_lock);
-  bool search_success = false;
+/*caller should hold the cache_lock*/
+static struct cache_entry* cache_search(block_sector_t sector) { 
+  struct cache_entry* cache = NULL;
   struct list_elem* e;
+  bool search_success = false;
   for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e)) {
     cache = list_entry(e, struct cache_entry, elem);
     if (cache->sector == sector) {
       search_success = true;
       list_remove(e);
       list_push_front(&cache_list, e);
-      //important order, first grab the cache_entry's lock and then free global lock
-      lock_acquire(&cache->block_lock);
-      lock_release(&cache_lock);
       break;
     }
   }
-
-  /*call block_read to read the sector to cache*/
-  if (!search_success) {
-    cache = calloc(1, sizeof(struct cache_entry));
-    if(!cache){
-      process_exit();
-    }
-    lock_init(&cache->block_lock);
-    cache->sector = sector;
-    block_read(fs_device, sector, cache->data);
-    //checking if need to evict
-    if (list_size(&cache_list) >= 64) {
-      struct cache_entry* write_back =
-          list_entry(list_pop_back(&cache_list), struct cache_entry, elem);
-      //write to disk if modified
-      if (write_back->dirty) {
-        block_write(fs_device, write_back->sector, write_back->data);
-      }
-      free(write_back);
-    }
-    list_push_front(&cache_list, &cache->elem);
-    lock_acquire(&cache->block_lock);
-    lock_release(&cache_lock);
+  if (!search_success){
+    cache = NULL;
   }
+  return cache;
+}
+
+/*caller should hold the cache_lock*/
+static struct cache_entry* cache_insert(block_sector_t sector){
+  struct cache_entry* cache;
+  cache = calloc(1, sizeof(struct cache_entry));
+  if (!cache) {
+    process_exit();
+  }
+  //initialize cache entry
+  lock_init(&cache->block_lock);
+  cache->sector = sector;
+  block_read(fs_device, sector, cache->data);
+  //checking if need to evict
+  if (list_size(&cache_list) >= 64) {
+    struct cache_entry* write_back =
+        list_entry(list_pop_back(&cache_list), struct cache_entry, elem);
+    //write to disk if modified
+    if (write_back->dirty) {
+      block_write(fs_device, write_back->sector, write_back->data);
+    }
+    free(write_back);
+  }
+  list_push_front(&cache_list, &cache->elem);
+  return cache;
+}
+
+/*read the cache*/
+off_t cache_read_at(block_sector_t sector, void* buffer_, off_t size, off_t offset) {
+  uint8_t* buffer = buffer_;
+  struct cache_entry* cache;
+
+  /*search the cache list via sector*/
+  lock_acquire(&cache_lock);
+  cache = cache_search(sector);
+
+  /*update the cache*/
+  if (!cache) {
+    cache = cache_insert(sector);
+  }
+
+  lock_acquire(&cache->block_lock);
+  lock_release(&cache_lock);
 
   /*read the cache to the buffer*/
   memcpy(buffer, cache->data + offset, size);
@@ -88,43 +105,15 @@ off_t cache_write_at(block_sector_t sector, const void* buffer_, off_t size, off
 
   /*search the cache list via sector*/
   lock_acquire(&cache_lock);
-  bool search_success = false;
-  struct list_elem* e;
-  for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e)) {
-    cache = list_entry(e, struct cache_entry, elem);
-    if (cache->sector == sector) {
-      search_success = true;
-      list_remove(e);
-      list_push_front(&cache_list, e);
-      lock_acquire(&cache->block_lock);
-      lock_release(&cache_lock);
-      break;
-    }
+  cache = cache_search(sector);
+
+  /*update the cache*/
+  if (!cache) {
+    cache = cache_insert(sector);
   }
 
-  /*call block_read to read the sector to cache*/
-  if (!search_success) {
-    cache = calloc(1, sizeof(struct cache_entry));
-    if (!cache) {
-      process_exit();
-    }
-    lock_init(&cache->block_lock);
-    cache->sector = sector;
-    block_read(fs_device, sector, cache->data);
-    //checking if need to evict
-    if (list_size(&cache_list) >= 64) {
-      struct cache_entry* write_back =
-          list_entry(list_pop_back(&cache_list), struct cache_entry, elem);
-      //write to disk if modified
-      if (write_back->dirty) {
-        block_write(fs_device, write_back->sector, write_back->data);
-      }
-      free(write_back);
-    }
-    list_push_front(&cache_list, &cache->elem);
-    lock_acquire(&cache->block_lock);
-    lock_release(&cache_lock);
-  }
+  lock_acquire(&cache->block_lock);
+  lock_release(&cache_lock);
 
   /*write the cache from the buffer*/
   memcpy(cache->data + offset, buffer, size);
@@ -162,11 +151,12 @@ void filesys_done(void) {
   struct list_elem* e;
   struct cache_entry* cache;
   //lock_acquire(&cache_lock);
-  for (e = list_begin(&cache_list); e != list_end(&cache_list); e = list_next(e)) {
+  for (e = list_begin(&cache_list); e != list_end(&cache_list);) {
     cache = list_entry(e, struct cache_entry, elem);
     if (cache->dirty) {
       block_write(fs_device, cache->sector, cache->data);
     }
+    e = list_next(e);
     free(cache);
   }
   //lock_release(&cache_lock);
