@@ -61,7 +61,7 @@ static struct cache_entry* cache_insert(block_sector_t sector){
   cache->sector = sector;
   block_read(fs_device, sector, cache->data);
   //checking if need to evict
-  if (list_size(&cache_list) >= 64) {
+  if (list_size(&cache_list) >= CACHE_MAX) {
     struct cache_entry* write_back =
         list_entry(list_pop_back(&cache_list), struct cache_entry, elem);
     //write to disk if modified

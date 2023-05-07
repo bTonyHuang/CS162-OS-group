@@ -24,7 +24,7 @@ static inline size_t bytes_to_sectors(off_t size) { return DIV_ROUND_UP(size, BL
 //     return -1;
 // }
 
-static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
+static block_sector_t byte_to_sector(const struct inode* inode, off_t pos, off_t inode_length) {
   ASSERT(inode != NULL);
   struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
   if(!disk_inode){
@@ -32,17 +32,17 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
   }
   cache_read_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
 
-  
-  if (pos < disk_inode->length) {
+  /*check direct sectors*/
+  if (pos < inode_length) {
     if (pos < DIRECTS_SIZE * BLOCK_SECTOR_SIZE) {
       // the position we want to read at is in one of the direct pointers
       block_sector_t sector_id = disk_inode->directs[pos / BLOCK_SECTOR_SIZE];
 
       free(disk_inode);
       return sector_id;
-    } else if (pos < DIRECTS_SIZE * BLOCK_SECTOR_SIZE + BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4) {
+    } else if (pos < (DIRECTS_SIZE + INDIRECT_SIZE) * BLOCK_SECTOR_SIZE) {
       // the position we want to read at has to go through the indirect pointer
-      block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
+      block_sector_t indirect_pointers[INDIRECT_SIZE];
       //block_read(fs_device, disk_inode->indirect, &indirect_pointers);
       cache_read_at(disk_inode->indirect, indirect_pointers, BLOCK_SECTOR_SIZE, 0);
       // then find the right pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the indirect references
@@ -53,22 +53,22 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos) {
       return sector_id;
     } else {
       // doubly indirect pointer
-      block_sector_t dbl_indirect_pointers[BLOCK_SECTOR_SIZE / 4];
+      block_sector_t dbl_indirect_pointers[INDIRECT_SIZE];
       //block_read(fs_device, disk_inode->dbl_indirect, &dbl_indirect_pointers);
       cache_read_at(disk_inode->dbl_indirect, dbl_indirect_pointers, BLOCK_SECTOR_SIZE, 0);
       // then find the right indirect pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the dbl indirect references
-      off_t new_pos = pos - (DIRECTS_SIZE + BLOCK_SECTOR_SIZE / 4) * BLOCK_SECTOR_SIZE; // account for passing all direct pointers and the indirect pointer
-      off_t dbl_index = new_pos / (BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4);
+      off_t new_pos = pos - (DIRECTS_SIZE + INDIRECT_SIZE) * BLOCK_SECTOR_SIZE; // account for passing all direct pointers and the indirect pointer
+      off_t dbl_index = new_pos / (INDIRECT_SIZE * BLOCK_SECTOR_SIZE);
       
       block_sector_t indirect_id = dbl_indirect_pointers[dbl_index];
 
       // read the indirect pointer we identified
-      block_sector_t indirect_pointers[BLOCK_SECTOR_SIZE / 4];
+      block_sector_t indirect_pointers[INDIRECT_SIZE];
       //block_read(fs_device, indirect_id, &indirect_pointers);
       cache_read_at(indirect_id, indirect_pointers, BLOCK_SECTOR_SIZE, 0);
 
       // 0 - 127 * 512
-      off_t indirect_pos = new_pos - dbl_index * BLOCK_SECTOR_SIZE * BLOCK_SECTOR_SIZE / 4;
+      off_t indirect_pos = new_pos - dbl_index * INDIRECT_SIZE * BLOCK_SECTOR_SIZE;
       // alternative: off_t indirect_pos = new_pos % (BLOCK_SECTOR_SIZE / 4 * BLOCK_SECTOR_SIZE); // account for passing over some indirect pointers when indexing into our doubly indirect pointer
 
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
@@ -113,10 +113,10 @@ bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
 
   disk_inode = calloc(1, sizeof *disk_inode);
   if (disk_inode != NULL) {
-    disk_inode->length = length;
     disk_inode->is_dir = is_dir;
     disk_inode->magic = INODE_MAGIC;
     success = inode_resize(disk_inode, length);
+    disk_inode->length = length;
     if (success) {
       //block_write(fs_device, sector, disk_inode);
       cache_write_at(sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
@@ -203,6 +203,7 @@ void inode_close(struct inode* inode) {
       //block_read(fs_device, inode->sector, disk_inode);
       cache_read_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
       inode_resize(disk_inode, 0);
+      disk_inode->length = 0;
       //block_write(fs_device, inode->sector, disk_inode);
       cache_write_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
       free_map_release(inode->sector, 1);
@@ -236,14 +237,15 @@ off_t inode_read_at(struct inode* inode, void* buffer_, off_t size, off_t offset
   off_t bytes_read = 0;
   uint8_t* bounce = NULL;
 
+  int length = inode_length(inode);
   // lock_acquire(&inode->inode_lock);
   while (size > 0) {
     /* Disk sector to read, starting byte offset within sector. */
-    block_sector_t sector_idx = byte_to_sector(inode, offset);
+    block_sector_t sector_idx = byte_to_sector(inode, offset, length);
     int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
     /* Bytes left in inode, bytes left in sector, lesser of the two. */
-    off_t inode_left = inode_length(inode) - offset;
+    off_t inode_left = length - offset;
     int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
     int min_left = inode_left < sector_left ? inode_left : sector_left;
 
@@ -275,22 +277,21 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
   const uint8_t* buffer = buffer_;
   off_t bytes_written = 0;
   uint8_t* bounce = NULL;
-
+  
   lock_acquire(&inode->inode_lock);
-  // if inode_disk (file) curr length < offset + size, then we gotta resize (aka expand and allocate), then do the writes
-  if (inode_length(inode) < offset + size){
-    // get inode_disk into memory
-    struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
-    if (!disk_inode) {
-      return 0;
-    }
-    //block_read(fs_device, inode->sector, disk_inode);
-    cache_read_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
-    bool success = inode_resize(disk_inode, offset + size);
-    //block_write(fs_device, inode->sector, disk_inode);
-    cache_write_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
-    free(disk_inode);
+  // get inode_disk into memory
+  struct inode_disk* disk_inode = calloc(1, sizeof(struct inode_disk));
+  if (!disk_inode) {
+    return 0;
+  }
+  //block_read(fs_device, inode->sector, disk_inode);
+  cache_read_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
 
+  // if inode_disk (file) curr length < offset + size, then we gotta resize (aka expand and allocate), then do the writes
+  bool need_resize = (disk_inode->length < offset + size);
+  int inode_length = need_resize ? offset + size : disk_inode->length;
+  if (need_resize) {
+    bool success = inode_resize(disk_inode, inode_length);
     if (!success) {
       lock_release(&inode->inode_lock);
       return 0;
@@ -304,11 +305,11 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
 
   while (size > 0) {
     /* Sector to write, starting byte offset within sector. */
-    block_sector_t sector_idx = byte_to_sector(inode, offset);
+    block_sector_t sector_idx = byte_to_sector(inode, offset, inode_length);
     int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
     /* Bytes left in inode, bytes left in sector, lesser of the two. */
-    off_t inode_left = inode_length(inode) - offset;
+    off_t inode_left = inode_length - offset;
     int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
     int min_left = inode_left < sector_left ? inode_left : sector_left;
 
@@ -326,6 +327,12 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
     bytes_written += chunk_size;
   }
   free(bounce);
+
+  if(need_resize){
+    disk_inode->length = inode_length;
+    cache_write_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
+  }
+  free(disk_inode);
 
   lock_release(&inode->inode_lock);
   return bytes_written;
@@ -438,8 +445,8 @@ bool inode_resize(struct inode_disk* id, off_t size) {
     return false;
   }
 
-  //adjust the size(not sure needed, the rubric of design doc says no)
-  id->length = size;
+  //adjust the size, the rubric of design doc says no
+  //id->length = size;
   return true;
 }
 
