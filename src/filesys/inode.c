@@ -296,6 +296,7 @@ off_t inode_write_at(struct inode* inode, const void* buffer_, off_t size, off_t
       lock_release(&inode->inode_lock);
       return 0;
     }
+    cache_write_at(inode->sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
   }
 
   if (inode->deny_write_cnt){
