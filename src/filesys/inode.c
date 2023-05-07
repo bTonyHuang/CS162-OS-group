@@ -42,7 +42,7 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos, off_t
       return sector_id;
     } else if (pos < (DIRECTS_SIZE + INDIRECT_SIZE) * BLOCK_SECTOR_SIZE) {
       // the position we want to read at has to go through the indirect pointer
-      block_sector_t indirect_pointers[INDIRECT_SIZE];
+      block_sector_t* indirect_pointers = calloc(INDIRECT_SIZE, sizeof(block_sector_t));
       //block_read(fs_device, disk_inode->indirect, &indirect_pointers);
       cache_read_at(disk_inode->indirect, indirect_pointers, BLOCK_SECTOR_SIZE, 0);
       // then find the right pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the indirect references
@@ -50,10 +50,11 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos, off_t
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
 
       free(disk_inode);
+      free(indirect_pointers);
       return sector_id;
     } else {
       // doubly indirect pointer
-      block_sector_t dbl_indirect_pointers[INDIRECT_SIZE];
+      block_sector_t* dbl_indirect_pointers = calloc(INDIRECT_SIZE, sizeof(block_sector_t));
       //block_read(fs_device, disk_inode->dbl_indirect, &dbl_indirect_pointers);
       cache_read_at(disk_inode->dbl_indirect, dbl_indirect_pointers, BLOCK_SECTOR_SIZE, 0);
       // then find the right indirect pointer out of the 128 (512 block size / 4 bytes per sector pointer) that the dbl indirect references
@@ -63,7 +64,7 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos, off_t
       block_sector_t indirect_id = dbl_indirect_pointers[dbl_index];
 
       // read the indirect pointer we identified
-      block_sector_t indirect_pointers[INDIRECT_SIZE];
+      block_sector_t* indirect_pointers = calloc(INDIRECT_SIZE, sizeof(block_sector_t));
       //block_read(fs_device, indirect_id, &indirect_pointers);
       cache_read_at(indirect_id, indirect_pointers, BLOCK_SECTOR_SIZE, 0);
 
@@ -74,6 +75,8 @@ static block_sector_t byte_to_sector(const struct inode* inode, off_t pos, off_t
       block_sector_t sector_id = indirect_pointers[indirect_pos / BLOCK_SECTOR_SIZE];
 
       free(disk_inode);
+      free(dbl_indirect_pointers);
+      free(indirect_pointers);
       return sector_id;
     }
   } else {
